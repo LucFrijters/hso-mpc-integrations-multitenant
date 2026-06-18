@@ -1,0 +1,27 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "powershell",
+    "FUNCTIONS_WORKER_RUNTIME_VERSION": "7.6",
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": "",
+    "KEY_VAULT_URI": "https://hso-mpc-integration-kv.vault.azure.net/",
+    "STORAGE_ACCOUNT_NAME": "hsompcintegrationsa",
+    "STORAGE_CONTAINER_NAME": "partner-data-raw",
+    "PARTNER_CONFIG_SECRET_NAME": "partner-config",
+    "APP_CERTIFICATE_NAME": "app-certificate",
+    "APP_CLIENT_ID": "",
+    "TIMER_SCHEDULE": "0 0 */2 * * *",
+    "INSIGHTS_DAILY_HOUR_UTC": "2",
+    "INSIGHTS_AUTH_MODE": "AppPlusUser",
+    "INSIGHTS_REPORT_PREFIX": "hso-auto-",
+    "INSIGHTS_RECURRENCE_HOURS": "24",
+    "INSIGHTS_RECURRENCE_COUNT": "600",
+    "INSIGHTS_REPORT_FORMAT": "CSV",
+    "INSIGHTS_ENSURE_ALL_DATASETS": "true",
+    "INSIGHTS_MAX_ROWS_PER_REPORT": "500000",
+    "MAX_CONCURRENT_PARTNERS": "4",
+    "MAX_CONCURRENT_ENDPOINTS": "5",
+    "COLLECTION_TIMEOUT_MINUTES": "25"
+  }
+}

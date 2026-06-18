@@ -1,0 +1,47 @@
+{
+  "version": "2.0",
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "maxTelemetryItemsPerSecond": 20,
+        "excludedTypes": "Request;Exception"
+      },
+      "enableLiveMetrics": true,
+      "enableDependencyTracking": true
+    },
+    "logLevel": {
+      "default": "Information",
+      "Host.Results": "Information",
+      "Function": "Information",
+      "Host.Aggregator": "Warning",
+      "DurableTask.AzureStorage": "Warning",
+      "DurableTask.Core": "Warning"
+    }
+  },
+  "extensions": {
+    "durableTask": {
+      "hubName": "HsoMpcIntegration",
+      "storageProvider": {
+        "type": "AzureStorage",
+        "maxQueuePollingInterval": "00:00:05"
+      },
+      "maxConcurrentActivityFunctions": 10,
+      "maxConcurrentOrchestratorFunctions": 5,
+      "extendedSessionsEnabled": true,
+      "extendedSessionIdleTimeoutInSeconds": 30
+    },
+    "http": {
+      "routePrefix": "api",
+      "maxOutstandingRequests": 200,
+      "maxConcurrentRequests": 100
+    }
+  },
+  "functionTimeout": "00:30:00",
+  "managedDependency": {
+    "enabled": true
+  },
+  "concurrency": {
+    "dynamicConcurrencyEnabled": true
+  }
+}

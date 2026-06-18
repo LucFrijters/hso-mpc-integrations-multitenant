@@ -1,0 +1,22 @@
+# Keep repository text files on LF across Windows and CI.
+* text=auto eol=lf
+
+# Source and configuration files.
+*.bicep text eol=lf
+*.bicepparam text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+*.psd1 text eol=lf
+*.psm1 text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binary artifacts.
+*.gif binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.webp binary
+*.zip binary

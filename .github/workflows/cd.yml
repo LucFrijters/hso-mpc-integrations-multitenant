@@ -1,0 +1,114 @@
+name: CD — Deploy to Azure
+
+on:
+  workflow_run:
+    workflows: ["CI — Validate & Test"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ───────────────────────────────────────────────────────
+  # Deploy infrastructure
+  # ───────────────────────────────────────────────────────
+  deploy-infra:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment: production
+    outputs:
+      functionAppName: ${{ steps.deploy.outputs.functionAppName }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create Resource Group
+        run: |
+          az group create \
+            --name rg-hso-mpc-multitenant-integration-prod \
+            --location westeurope \
+            --tags project=hso-mpc-multitenant-integration environment=prod managedBy=bicep
+
+      - name: Deploy Bicep
+        id: deploy
+        env:
+          APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+        run: |
+          result=$(az deployment group create \
+            --resource-group rg-hso-mpc-multitenant-integration-prod \
+            --template-file infra/main.bicep \
+            --parameters infra/parameters/prod.bicepparam \
+            --query "properties.outputs" \
+            --output json)
+          echo "functionAppName=$(echo $result | jq -r '.functionAppName.value')" >> $GITHUB_OUTPUT
+
+  # ───────────────────────────────────────────────────────
+  # Deploy function app code
+  # ───────────────────────────────────────────────────────
+  deploy-code:
+    name: Deploy Function App Code
+    needs: deploy-infra
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: function-app-package
+          path: ./deploy
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy to Azure Functions
+        uses: azure/functions-action@v1
+        with:
+          app-name: ${{ needs.deploy-infra.outputs.functionAppName }}
+          package: ./deploy/function-app.zip
+
+      - name: Verify deployment
+        shell: pwsh
+        run: |
+          $maxRetries = 6
+          $retryDelay = 10
+          for ($i = 1; $i -le $maxRetries; $i++) {
+              try {
+                  $funcApp = az functionapp show `
+                      --name "${{ needs.deploy-infra.outputs.functionAppName }}" `
+                      --resource-group rg-hso-mpc-multitenant-integration-prod `
+                      --query "{state:state,defaultHostName:defaultHostName}" `
+                      --output json | ConvertFrom-Json
+                  if ($funcApp.state -eq 'Running') {
+                      Write-Host "✓ Function App is running at $($funcApp.defaultHostName)"
+                      break
+                  }
+              }
+              catch {
+                  Write-Host "Attempt $i/$maxRetries — waiting ${retryDelay}s..."
+                  Start-Sleep -Seconds $retryDelay
+              }
+          }

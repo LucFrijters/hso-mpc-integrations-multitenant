@@ -1,0 +1,155 @@
+name: CI — Validate & Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC federation
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+
+jobs:
+  # ───────────────────────────────────────────────────────
+  # Validate Bicep templates
+  # ───────────────────────────────────────────────────────
+  validate-bicep:
+    name: Validate Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build Bicep
+        run: az bicep build --file infra/main.bicep
+
+      - name: Validate Bicep (What-If)
+        env:
+          APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+        run: |
+          az group create \
+            --name rg-hso-mpc-multitenant-integration-dev \
+            --location westeurope \
+            --tags project=hso-mpc-multitenant-integration environment=dev managedBy=bicep
+          az deployment group validate \
+            --resource-group rg-hso-mpc-multitenant-integration-dev \
+            --template-file infra/main.bicep \
+            --parameters infra/parameters/dev.bicepparam
+
+  # ───────────────────────────────────────────────────────
+  # Lint PowerShell
+  # ───────────────────────────────────────────────────────
+  lint-powershell:
+    name: Lint PowerShell
+    # PowerShell 7.6 (the deployed worker) is Windows-only; lint on Windows pwsh 7.x to match.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path ./src/function-app -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+          if ($results) {
+              $results | Format-Table -AutoSize
+              throw "PSScriptAnalyzer found $($results.Count) issue(s)."
+          }
+          Write-Host "✓ PSScriptAnalyzer passed — no issues found."
+
+      - name: Lint helper scripts
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path ./scripts -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
+          if ($results) {
+              $results | Format-Table -AutoSize
+              throw "PSScriptAnalyzer found $($results.Count) issue(s) in scripts."
+          }
+          Write-Host "✓ Scripts lint passed."
+
+  # ───────────────────────────────────────────────────────
+  # Pester tests
+  # ───────────────────────────────────────────────────────
+  test-powershell:
+    name: Pester Tests
+    # Run on Windows to match the PowerShell 7.6 (Windows-only) worker runtime.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: Install-Module -Name Pester -Force -Scope CurrentUser -MinimumVersion 5.0.0
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = './test-results.xml'
+          $config.TestResult.OutputFormat = 'JUnitXml'
+          Invoke-Pester -Configuration $config
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ./test-results.xml
+
+  # ───────────────────────────────────────────────────────
+  # Package function app
+  # ───────────────────────────────────────────────────────
+  package:
+    name: Package Function App
+    needs: [validate-bicep, lint-powershell, test-powershell]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create deployment package
+        shell: pwsh
+        run: |
+          $source = './src/function-app'
+          $staging = './deploy/function-app'
+          $output = './deploy/function-app.zip'
+          if (Test-Path ./deploy) { Remove-Item ./deploy -Recurse -Force }
+          New-Item -Path $staging -ItemType Directory -Force | Out-Null
+          Get-ChildItem -Path $source -Recurse -File |
+            Where-Object {
+              $_.Name -ne 'local.settings.json' -and
+              $_.FullName -notmatch '[\\/]\.vscode[\\/]'
+            } |
+            ForEach-Object {
+              $relativePath = $_.FullName.Substring((Resolve-Path $source).Path.Length + 1)
+              $destination = Join-Path $staging $relativePath
+              New-Item -Path (Split-Path $destination -Parent) -ItemType Directory -Force | Out-Null
+              Copy-Item -Path $_.FullName -Destination $destination -Force
+            }
+          Compress-Archive -Path "$staging/*" -DestinationPath $output -Force
+          Write-Host "Package created: $output ($('{0:N2}' -f ((Get-Item $output).Length / 1KB)) KB)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function-app-package
+          path: ./deploy/function-app.zip
+          retention-days: 7
