@@ -92,11 +92,10 @@ CI uses the same safety rule: the package job stages `src/function-app` first an
 Use the `ManualStart` HTTP function for operator-triggered collection cycles. It starts the same Durable orchestration as `TimerStart`, but avoids the Azure Portal timer-trigger hostruntime path that can return `404 NotFound` even when the function is indexed.
 
 ```powershell
-$manualKey = az functionapp function keys list `
+$manualKey = az functionapp keys list `
   --resource-group hso-mpc-multitenant-integration-prd-westeu `
   --name func-hso-mpc-integration-prd-westeu `
-  --function-name ManualStart `
-  --query default `
+  --query functionKeys.default `
   --output tsv
 
 Invoke-RestMethod -Method Post `

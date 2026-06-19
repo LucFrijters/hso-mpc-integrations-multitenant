@@ -4,6 +4,7 @@
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "powershell",
     "FUNCTIONS_WORKER_RUNTIME_VERSION": "7.6",
+    "ExternalDurablePowerShellSDK": "false",
     "APPLICATIONINSIGHTS_CONNECTION_STRING": "",
     "KEY_VAULT_URI": "https://hso-mpc-integration-kv.vault.azure.net/",
     "STORAGE_ACCOUNT_NAME": "hsompcintegrationsa",

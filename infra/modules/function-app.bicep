@@ -100,6 +100,10 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: powerShellVersion
         }
         {
+          name: 'ExternalDurablePowerShellSDK'
+          value: 'false'
+        }
+        {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: appInsightsConnectionString
         }

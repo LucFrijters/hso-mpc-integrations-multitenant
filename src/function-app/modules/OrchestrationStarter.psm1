@@ -1,7 +1,6 @@
 function Start-CollectionOrchestration {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
         $StarterClient,
 
         [Parameter(Mandatory)]
@@ -26,10 +25,29 @@ function Start-CollectionOrchestration {
         MaxConcurrentEndpoints = $config.MaxConcurrentEndpoints
     } | ConvertTo-Json -Compress
 
-    $instanceId = Start-DurableOrchestration `
-        -FunctionName 'OrchestrateAllTenants' `
-        -Input $orchestratorInput `
-        -DurableClient $StarterClient
+    $startCommand = Get-Command -Name Start-DurableOrchestration -ErrorAction SilentlyContinue
+    if (-not $startCommand) {
+        $startCommand = Get-Command -Name Start-NewOrchestration -ErrorAction Stop
+    }
+
+    $startParameters = @{ FunctionName = 'OrchestrateAllTenants' }
+    if ($startCommand.Parameters.ContainsKey('Input')) {
+        $startParameters['Input'] = $orchestratorInput
+    }
+    elseif ($startCommand.Parameters.ContainsKey('InputObject')) {
+        $startParameters['InputObject'] = $orchestratorInput
+    }
+
+    if ($null -ne $StarterClient -and $startCommand.Parameters.ContainsKey('DurableClient')) {
+        $startParameters['DurableClient'] = $StarterClient
+    }
+
+    if ($startCommand.Name -eq 'Start-DurableOrchestration') {
+        $instanceId = Start-DurableOrchestration @startParameters
+    }
+    else {
+        $instanceId = Start-NewOrchestration @startParameters
+    }
 
     Write-Host "[$correlationId] Started orchestration instance: $instanceId"
     Write-Host "METRIC: collection.orchestration.started = 1 | correlationId=$correlationId orchestrationId=$instanceId triggerSource=$TriggerSource"
