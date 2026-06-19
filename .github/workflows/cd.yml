@@ -27,7 +27,8 @@ jobs:
     name: Deploy Infrastructure
     runs-on: windows-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    environment: production
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT_NAME || 'production' }}
     outputs:
       functionAppName: ${{ steps.deploy.outputs.functionAppName }}
     steps:
@@ -54,10 +55,11 @@ jobs:
           APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
         shell: pwsh
         run: |
-          $result = az deployment group create `
-            --resource-group rg-hso-mpc-multitenant-integration-prod `
+          $result = az deployment sub create `
+            --location westeurope `
             --template-file infra/main.bicep `
             --parameters infra/parameters/prod.bicepparam `
+            --parameters rgName=rg-hso-mpc-multitenant-integration-prod rgLocation=westeurope `
             --query "properties.outputs" `
             --output json | ConvertFrom-Json
           "functionAppName=$($result.functionAppName.value)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -69,7 +71,8 @@ jobs:
     name: Deploy Function App Code
     needs: deploy-infra
     runs-on: windows-latest
-    environment: production
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT_NAME || 'production' }}
     steps:
       - name: Azure Login (OIDC)
         uses: azure/login@v2

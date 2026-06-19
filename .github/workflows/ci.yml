@@ -44,10 +44,11 @@ jobs:
             --name rg-hso-mpc-multitenant-integration-dev `
             --location westeurope `
             --tags project=hso-mpc-multitenant-integration environment=dev managedBy=bicep
-          az deployment group validate `
-            --resource-group rg-hso-mpc-multitenant-integration-dev `
+          az deployment sub validate `
+            --location westeurope `
             --template-file infra/main.bicep `
-            --parameters infra/parameters/dev.bicepparam
+            --parameters infra/parameters/dev.bicepparam `
+            --parameters rgName=rg-hso-mpc-multitenant-integration-dev rgLocation=westeurope
 
   # ───────────────────────────────────────────────────────
   # Lint PowerShell

@@ -1,0 +1,10 @@
+[
+    {
+        "TenantId": "9bc096ab-f225-476e-8e92-260401469868",
+        "DisplayName": "HSO Production",
+        "Enabled": true,
+        "MpnId": "1021608",
+        "CollectPartnerInsights": true,
+        "CollectPartnerSecurityScore": false
+    }
+]

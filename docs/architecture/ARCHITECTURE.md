@@ -1060,36 +1060,20 @@ Use this when only Microsoft Graph Partner Security Score data is required. This
 ```json
 [
   {
-    "TenantId": "<tenant-guid-1>",
-    "DisplayName": "Full collection partner",
+    "TenantId": "9bc096ab-f225-476e-8e92-260401469868",
+    "DisplayName": "HSO Production",
     "Enabled": true,
-    "MpnId": "123456",
+    "MpnId": "1021608",
     "CollectPartnerInsights": true,
-    "CollectPartnerSecurityScore": true
+    "CollectPartnerSecurityScore": false
   },
   {
-    "TenantId": "<tenant-guid-2>",
+    "TenantId": "HSOTTCSP",
     "DisplayName": "Insights only partner",
     "Enabled": true,
     "MpnId": "234567",
     "CollectPartnerInsights": true,
     "CollectPartnerSecurityScore": false
-  },
-  {
-    "TenantId": "<tenant-guid-3>",
-    "DisplayName": "Security score only partner",
-    "Enabled": true,
-    "MpnId": "345678",
-    "CollectPartnerInsights": false,
-    "CollectPartnerSecurityScore": true
-  },
-  {
-    "TenantId": "<tenant-guid-4>",
-    "DisplayName": "Temporarily disabled partner",
-    "Enabled": false,
-    "MpnId": "456789",
-    "CollectPartnerInsights": true,
-    "CollectPartnerSecurityScore": true
   }
 ]
 ```
@@ -1097,9 +1081,9 @@ Use this when only Microsoft Graph Partner Security Score data is required. This
 Store the JSON in Key Vault:
 
 ```powershell
-$tenantsConfigJson = Get-Content -Path .\tenants-config.json -Raw
+$tenantsConfigJson = Get-Content -Path .\docs\tenants-config.json -Raw
 Set-AzKeyVaultSecret `
-  -VaultName <kv-name> `
+  -VaultName 'kv-hso-mpc-integration' `
   -Name 'tenants-config' `
   -SecretValue (ConvertTo-SecureString -String $tenantsConfigJson -AsPlainText -Force)
 ```

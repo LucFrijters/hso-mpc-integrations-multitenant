@@ -87,7 +87,7 @@ param (
 
     [string]$SubscriptionId = "12fe5cbf-2fab-4937-9368-655f987fecab", # HSO Group (DevTest)
 
-    [switch]$SkipInfra = $true,
+    [switch]$SkipInfra,
 
     [switch]$SkipCode,
 
@@ -293,13 +293,14 @@ $env:ALERT_EMAIL_ADDRESS = $AlertEmailAddress
 
 if (-not $SkipInfra) {
     Write-Host "  Running what-if analysis (no changes applied)..." -ForegroundColor Yellow
-    az deployment group what-if `
-        --resource-group $ResourceGroupName `
+    az deployment sub what-if `
+        --location $Location `
         --template-file $bicepFile `
         --parameters $paramFile `
+        --parameters rgName=$ResourceGroupName rgLocation=$Location `
         --name $deployName `
         --output table
-    Assert-ExitCode "az deployment group what-if"
+    Assert-ExitCode "az deployment sub what-if"
     Write-Ok "What-if completed"
 }
 else {
@@ -315,14 +316,15 @@ $functionAppName = $null
 if (-not $SkipInfra) {
     Write-Host "  Deploying infrastructure — this typically takes 5–10 minutes..." -ForegroundColor Yellow
 
-    $rawOutput = az deployment group create `
-        --resource-group $ResourceGroupName `
+    $rawOutput = az deployment sub create `
+        --location $Location `
         --template-file $bicepFile `
         --parameters $paramFile `
+        --parameters rgName=$ResourceGroupName rgLocation=$Location `
         --name $deployName `
         --output json 2>&1
 
-    Assert-ExitCode "az deployment group create"
+    Assert-ExitCode "az deployment sub create"
 
     $deployment = $rawOutput | ConvertFrom-Json
     $state = $deployment.properties.provisioningState
