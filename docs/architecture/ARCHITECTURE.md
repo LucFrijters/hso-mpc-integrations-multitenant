@@ -490,36 +490,33 @@ Since these are **beta** endpoints:
 ```
 {container}/
   {tenant-display-name}_{tenant-id}/
-    {api-surface}/
-      {endpoint-category}/
-        {endpoint-name}/
-          {yyyy}/{MM}/{dd}/{HH}/
-            {endpoint-name}_{timestamp-utc}.json
-            _metadata.json
+    {yyyyMMddHH}/
+      {data-type}/
+        {endpoint-or-dataset-name}_{timestamp-utc}[_{execution-id}].json
+        {endpoint-or-dataset-name}_{timestamp-utc}[_{execution-id}]_metadata.json
 ```
+
+`{data-type}` is one of:
+
+| Data type | Contents |
+|-----------|----------|
+| `security-score` | Microsoft Graph Partner Security Score endpoints |
+| `partner-insights-reports` | Partner Insights catalogs and report execution JSON |
 
 **Concrete example:**
 
 ```
 mpc-insights-data-raw/
   hso-production_a1b2c3d4-e5f6-7890-abcd-ef1234567890/
-    partner-insights/
-      insights-catalog/
-        datasets/
-          2026/04/20/14/
-            datasets_2026-04-20T14-00-00Z.json
-            _metadata.json
-      insights-reports/
-        CustomersAndTenants/
-          2026/04/20/14/
-            CustomersAndTenants_2026-04-20T14-00-00Z_exec-123.json
-            _metadata.json
-    graph-beta/
-      partner-security-score/
-        security-score/
-          2026/04/20/14/
-            security-score_2026-04-20T14-00-00Z.json
-            _metadata.json
+    2026042014/
+      partner-insights-reports/
+        datasets_2026-04-20T14-00-00Z.json
+        datasets_2026-04-20T14-00-00Z_metadata.json
+        customersandtenants_2026-04-20T14-00-00Z_exec-123.json
+        customersandtenants_2026-04-20T14-00-00Z_exec-123_metadata.json
+      security-score/
+        security-score_2026-04-20T14-00-00Z.json
+        security-score_2026-04-20T14-00-00Z_metadata.json
 ```
 
 ### 9.2 Metadata Sidecar File

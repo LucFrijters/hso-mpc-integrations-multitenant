@@ -30,6 +30,23 @@ The Insights API does not return data on a simple GET. The `CollectInsights` act
 
 The collection is intentionally full-cycle: every run writes the current catalog and the latest completed report execution for every dataset, even when the latest `executionId` matches a prior run.
 
+## Blob layout
+
+Collection output is written under a shallow tenant/date-hour/data-type layout:
+
+```text
+mpc-insights-data-raw/
+  hso-production_<tenant-id>/
+    2026061916/
+      partner-insights-reports/
+        datasets_2026-06-19T16-00-00Z.json
+        customersandtenants_2026-06-19T16-00-00Z_<execution-id>.json
+      security-score/
+        security-score_2026-06-19T16-00-00Z.json
+```
+
+Each data file has a matching `*_metadata.json` sidecar in the same folder. The date-hour folder uses UTC `yyyyMMddHH`, matching the 4-hour collection interval.
+
 ## Repository structure
 
 ```

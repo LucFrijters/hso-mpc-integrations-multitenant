@@ -4,6 +4,37 @@
     Uses Managed Identity for authentication (no storage keys).
 #>
 
+function Get-SafeBlobPathSegment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Value
+    )
+
+    $safeValue = $Value -replace '[^a-zA-Z0-9\-]', '-'
+    $safeValue = $safeValue.Trim('-').ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($safeValue)) { return 'unknown' }
+    return $safeValue
+}
+
+
+function Get-CollectionDataType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Endpoint
+    )
+
+    if ($Endpoint.ApiSurface -eq 'graph-beta' -or $Endpoint.Category -eq 'partner-security-score') {
+        return 'security-score'
+    }
+
+    if ($Endpoint.ApiSurface -eq 'partner-insights') {
+        return 'partner-insights-reports'
+    }
+
+    return Get-SafeBlobPathSegment -Value ($Endpoint.Category ?? $Endpoint.ApiSurface ?? 'other')
+}
+
+
 function Write-CollectionToBlob {
     <#
     .SYNOPSIS
@@ -38,20 +69,19 @@ function Write-CollectionToBlob {
     $storageAccountName = $blobConfig.StorageAccountName
     $containerName = $blobConfig.StorageContainerName
 
-    # Sanitize tenant name for use in blob path
-    $safeTenantName = $TenantName -replace '[^a-zA-Z0-9\-]', '-' | ForEach-Object { $_.ToLower() }
-
     # Build blob path following the naming convention:
-    # {tenant-name}_{tenant-id}/{api-surface}/{category}/{endpoint-name}/{yyyy}/{MM}/{dd}/{HH}/
-    $datePath = $TimestampUtc.ToString('yyyy/MM/dd/HH')
+    # {tenant-name}_{tenant-id}/{yyyyMMddHH}/{data-type}/
+    $safeTenantName = Get-SafeBlobPathSegment -Value $TenantName
+    $datePath = $TimestampUtc.ToString('yyyyMMddHH')
+    $dataType = Get-CollectionDataType -Endpoint $Endpoint
     $fileTimestamp = $TimestampUtc.ToString('yyyy-MM-ddTHH-mm-ssZ')
-    $endpointName = $Endpoint.Name
+    $endpointName = Get-SafeBlobPathSegment -Value $Endpoint.Name
 
-    $basePath = "${safeTenantName}_${TenantId}/$($Endpoint.ApiSurface)/$($Endpoint.Category)/${endpointName}/${datePath}"
+    $basePath = "${safeTenantName}_${TenantId}/${datePath}/${dataType}"
 
-    $suffix = if ($FileNameSuffix) { "_$($FileNameSuffix -replace '[^a-zA-Z0-9\-]', '-')" } else { '' }
+    $suffix = if ($FileNameSuffix) { "_$(Get-SafeBlobPathSegment -Value $FileNameSuffix)" } else { '' }
     $dataBlobPath = "${basePath}/${endpointName}_${fileTimestamp}${suffix}.json"
-    $metadataBlobPath = "${basePath}/_metadata_${fileTimestamp}${suffix}.json"
+    $metadataBlobPath = "${basePath}/${endpointName}_${fileTimestamp}${suffix}_metadata.json"
 
     # Get storage context using Managed Identity
     $storageContext = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount

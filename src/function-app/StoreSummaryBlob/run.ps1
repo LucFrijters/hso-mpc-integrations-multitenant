@@ -15,7 +15,7 @@ try {
     $config = Get-IntegrationConfig
 
     $timestamp = [DateTimeOffset]::Parse($summary.CompletedUtc)
-    $blobPath = "_orchestration-summaries/$($timestamp.ToString('yyyy'))/$($timestamp.ToString('MM'))/$($timestamp.ToString('dd'))/$($timestamp.ToString('HH'))/summary_$($timestamp.ToString('yyyy-MM-ddTHH-mm-ssZ')).json"
+    $blobPath = "_orchestration-summaries/$($timestamp.ToString('yyyyMMddHH'))/summary_$($timestamp.ToString('yyyy-MM-ddTHH-mm-ssZ')).json"
 
     $jsonContent = $summary | ConvertTo-Json -Depth 20
 
@@ -32,7 +32,8 @@ try {
         Status   = 'Succeeded'
     }
 
-} catch {
+}
+catch {
     Write-Host "[$correlationId] StoreSummaryBlob: FAILED - $($_.Exception.Message)"
     return @{
         BlobPath = $null
