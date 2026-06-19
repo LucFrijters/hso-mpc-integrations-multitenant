@@ -17,12 +17,12 @@
 > - **Insights programmatic API** (`/insights/v1/mpn/…`): enumerate all datasets and queries, then ensure scheduled reports and download the latest completed execution per dataset. Report files arrive as **CSV/TSV and are converted to JSON** before storage.
 > - **Partner-global topology.** The Insights API and the Partner Security Score are both partner-level. They are collected **once from the HSO Production Partner Center**, not iterated per CSP customer tenant. Per-customer detail comes from inside the data (`CustomersAndTenants` rows; security-score `customerInsights`). The previous per-customer fan-out is removed — this is the principal efficiency gain.
 > - **Security Score corrected**: added `customerInsights`; removed `securityAlerts` (not a documented method of the partner security namespace).
-> - **Cadence**: Insights data refreshes daily and the report `RecurrenceInterval` minimum is 4h, so Insights collection is **daily**, not hourly.
-> - **Idempotency**: scheduled reports are created once and reused; executions are de-duplicated by `executionId`.
+> - **Cadence**: Insights report `RecurrenceInterval` minimum is 4h, so Insights collection runs on a fixed **every 4 hours UTC** cadence.
+> - **Full-cycle collection**: scheduled reports are created once and reused, but the latest completed execution is downloaded and stored on every collection cycle.
 
 > **Revision 2.1 — runtime to PowerShell 7.6 (2026-06-18).** The worker targets **PowerShell 7.6**, which on Azure Functions is currently **preview, Windows-only, and requires .NET 10**. PowerShell 7.4 is GA until **2026-11-10**, and 7.5 isn't offered on Functions, so 7.6 is the only forward version. Implications: the app must run on a **Windows** plan (the EP1 plan here is Windows, `reserved: false`); **Linux Consumption and Flex Consumption are not available on 7.6**. The runtime version is a Bicep parameter (`powerShellVersion`, default `7.6`, allowed `7.6`/`7.4`) so any environment can pin to `7.4` until 7.6 reaches GA. CI PowerShell jobs run on `windows-latest` to match the runtime.
 
-> **Revision 2.2 — Secure Application Model alignment (2026-06-19).** Partner Insights now defaults to the Microsoft Partner Center Secure Application Model App+User flow (`InsightsAuthMode: AppPlusUser`) using the delegated `https://api.partnercenter.microsoft.com/user_impersonation` scope. Refresh tokens are captured interactively with MFA, stored as Key Vault secrets named `refresh-token-{tenantId}`, rotated on redemption, and validated on Partner Center requests with `ValidateMfa: true` / `isMfaCompliant` where returned. Microsoft Graph Partner Security Score remains app-only with `PartnerSecurity.Read.All`.
+> **Revision 2.2 — Secure Application Model alignment (2026-06-19).** Partner Insights uses the Microsoft Partner Center Secure Application Model App+User flow (`AppPlusUser`) using the delegated `https://api.partnercenter.microsoft.com/user_impersonation` scope. Refresh tokens are captured interactively with MFA, stored as Key Vault secrets named `refresh-token-{tenantId}`, rotated on redemption, and validated on Partner Center requests with `ValidateMfa: true` / `isMfaCompliant` where returned. Microsoft Graph Partner Security Score supports both delegated and application `PartnerSecurity.Read.All`; this implementation uses application permission by default, with the Partner Center service-principal authorization noted in §6.2.
 
 > **Revision 2.3 — no VNet dependency / local Key Vault development (2026-06-19).** Function App VNet integration and private endpoints were removed. Key Vault and storage now use public Azure service endpoints with Microsoft Entra ID / RBAC authorization, which allows the local Functions host to use the main deployed Key Vault without VPN/private DNS. `scripts/Initialize-LocalDevelopment.ps1` configures local settings, can enable public Key Vault access, and can grant the signed-in developer the required Key Vault data-plane roles.
 
@@ -40,7 +40,7 @@
 6. [API Permissions — Least Privilege Matrix](#6-api-permissions--least-privilege-matrix)
 7. [Data Collection: Partner Insights Programmatic Analytics API](#7-data-collection-partner-insights-programmatic-analytics-api)
 8. [Data Collection: Partner Security Score (Graph Beta)](#8-data-collection-partner-security-score-graph-beta)
-9. [Blob Storage Layout & Retention Strategy](#9-blob-storage-layout--retention-strategy)
+9. [Blob Storage Layout](#9-blob-storage-layout)
 10. [Error Handling, Throttling & Retry Strategy](#10-error-handling-throttling--retry-strategy)
 11. [Observability: Logging, Metrics & Alerting](#11-observability-logging-metrics--alerting)
 12. [Security Hardening](#12-security-hardening)
@@ -71,7 +71,7 @@ The solution is designed for **enterprise-grade reliability**, aligned with the 
 | Goal                        | Metric                                                       |
 |-----------------------------|--------------------------------------------------------------|
 | Complete data collection    | 100% of Partner Insights datasets/reports + Security Score endpoints covered |
-| Freshness                   | Security Score no older than ~6 hours; Insights refreshed daily |
+| Freshness                   | Security Score no older than ~6 hours; Insights refreshed every 4 hours UTC |
 | Reliability                 | 99.9% successful collection cycles per month                 |
 | Security                    | No client secrets; certificate auth, Managed Identity, and Key Vault-stored SAM refresh tokens only |
 | Auditability                | Full lineage from API call to blob, with correlation IDs     |
@@ -171,11 +171,11 @@ The solution is designed for **enterprise-grade reliability**, aligned with the 
 |----------------------------------|--------------------------------------------|----------------------------------------------------|
 | Orchestrator                     | Azure Functions (Durable) — Windows EP1 by default | Timer trigger -> fan-out/fan-in across partner accounts |
 | Secrets & Certificates           | Azure Key Vault (Premium)                  | Certificate storage, refresh token storage         |
-| Raw Data Store                   | Azure Blob Storage (StorageV2, Hot → Cool) | JSON response and converted report persistence     |
+| Raw Data Store                   | Azure Blob Storage (StorageV2)             | JSON response and converted report persistence     |
 | Observability                    | Application Insights + Log Analytics       | Distributed tracing, metrics, alerting             |
 | Identity                         |              App Registration              | Single app consented in partner account(s)         |
 | Runtime Identity                 | System-assigned Managed Identity           | Access to Key Vault, Blob, token acquisition       |
-| Partner Configuration            | Key Vault secrets or App Configuration     | Per-partner metadata, auth mode, and MPN ID        |
+| Tenants Configuration            | Key Vault secrets or App Configuration     | Per-partner tenant metadata, MPN ID, and data-source selection |
 
 ---
 
@@ -238,7 +238,7 @@ client_id={app-client-id}
 &refresh_token={key-vault-refresh-token}
 ```
 
-For app-only surfaces, such as Microsoft Graph Partner Security Score and explicit Partner Insights app-only overrides, the function uses `client_credentials` with certificate authentication:
+For app-only surfaces, such as Microsoft Graph Partner Security Score, the function uses `client_credentials` with certificate authentication:
 
 ```
 POST https://login.microsoftonline.com/{partner-tenant-id}/oauth2/v2.0/token
@@ -349,7 +349,7 @@ if ($result.refresh_token -and $result.refresh_token -ne $refreshToken) {
 │  │                   │    │  • X.509 Certificate     │  │
 │  │  • No persistent  │◄───│  • Refresh tokens        │  │
 │  │    token cache    │    │    (per partner account) │  │
-│  │  • Per partner ID │    │  • partner-config JSON   │  │
+│  │  • Per partner ID │    │  • tenants-config JSON   │  │
 │  └─────────────────┘    └─────────────────────────┘  │
 │                                                       │
 │  Token identity: {tenantId}:{resource}:{authMode}       │
@@ -390,6 +390,8 @@ GET https://graph.microsoft.com/beta/security/partner/securityScore
 | Microsoft Graph  | `PartnerSecurity.Read.All`  | Application | Admin consent   |
 | Partner Center   | `user_impersonation`        | Delegated   | Partner consent |
 
+> **Operational note**: Microsoft Graph documents both delegated and application `PartnerSecurity.Read.All` for Partner Security Score. Application permission is valid, but the Partner Center backend can still require the app/service principal to be authorized in Partner Center. If app-only calls return backend errors such as `PCFraudEvents`, add the Entra application in Partner Center user management and assign the required Partner Center role, or use a delegated App+User flow with a Partner Center user that already has the required role.
+
 ### 6.3 Graph Beta — Partner Security Score Endpoints
 
 | Endpoint                                                              | Method | Description                                          |
@@ -427,12 +429,12 @@ This is the **partner-global** Insights analytics surface (`/mpn/`), distinct fr
 ### 7.3 Idempotency & efficiency
 
 - Reports are matched by a deterministic name (`<prefix><DatasetName>`) and created only if absent.
-- Each downloaded execution writes a marker blob under `_insights-state/{partnerTenantId}/{reportId}/{executionId}.json`; a subsequent cycle that sees the same `executionId` skips the download.
-- When `INSIGHTS_ENSURE_ALL_DATASETS=true`, every dataset returned by step 1 that is not explicitly registered also gets a generated `SELECT`-all report, guaranteeing **all datasets** are exported.
+- The latest completed execution for each report is downloaded and stored on every collection cycle, even when the `executionId` matches a prior run. This keeps every cycle as a full collection snapshot.
+- Every dataset returned by step 1 that is not explicitly registered also gets a generated `SELECT`-all report, guaranteeing **all datasets** are exported.
 
 ### 7.4 Authentication note
 
-Insights tokens use the Secure Application Model App+User flow by default (`InsightsAuthMode: AppPlusUser`) with the delegated `https://api.partnercenter.microsoft.com/user_impersonation` scope and refresh tokens stored in Key Vault. Partner Center requests send `ValidateMfa: true` and fail if `isMfaCompliant` is returned as `false`. App-only remains an explicit override only for endpoints and partner onboarding scenarios that support it; those tokens use `https://api.partnercenter.microsoft.com/.default`. Pagination follows the `nextLink` field on catalog responses.
+Insights tokens use the Secure Application Model App+User flow (`AppPlusUser`) with the delegated `https://api.partnercenter.microsoft.com/user_impersonation` scope and refresh tokens stored in Key Vault. Partner Center requests send `ValidateMfa: true` and fail if `isMfaCompliant` is returned as `false`. Pagination follows the `nextLink` field on catalog responses.
 
 ---
 
@@ -481,7 +483,7 @@ Since these are **beta** endpoints:
 
 ---
 
-## 9. Blob Storage Layout & Retention Strategy
+## 9. Blob Storage Layout
 
 ### 9.1 Naming Convention
 
@@ -499,7 +501,7 @@ Since these are **beta** endpoints:
 **Concrete example:**
 
 ```
-partner-data-raw/
+mpc-insights-data-raw/
   hso-production_a1b2c3d4-e5f6-7890-abcd-ef1234567890/
     partner-insights/
       insights-catalog/
@@ -546,60 +548,24 @@ Each data file is accompanied by a `_metadata.json`:
 }
 ```
 
-### 9.3 Lifecycle Management Policy
-
-| Tier        | Age          | Storage Tier | Purpose                                    |
-|-------------|--------------|--------------|---------------------------------------------|
-| Hot         | 0 – 7 days   | Hot          | Active analysis, debugging, reprocessing    |
-| Cool        | 7 – 90 days  | Cool         | Historical reference, compliance queries    |
-| Archive     | 90 – 365 days| Archive      | Long-term retention, regulatory compliance  |
-| Delete      | > 365 days   | —            | Automatic deletion (configurable)           |
-
-**Blob Lifecycle Management Rule (JSON):**
-
-```json
-{
-  "rules": [
-    {
-      "name": "tier-to-cool-after-7-days",
-      "enabled": true,
-      "type": "Lifecycle",
-      "definition": {
-        "filters": {
-          "blobTypes": ["blockBlob"],
-          "prefixMatch": ["partner-data-raw/"]
-        },
-        "actions": {
-          "baseBlob": {
-            "tierToCool": { "daysAfterModificationGreaterThan": 7 },
-            "tierToArchive": { "daysAfterModificationGreaterThan": 90 },
-            "delete": { "daysAfterModificationGreaterThan": 365 }
-          }
-        }
-      }
-    }
-  ]
-}
-```
-
-### 9.4 Immutability Considerations
+### 9.3 Immutability Considerations
 
 - Enable **blob versioning** on the storage account for auditability.
 - For regulatory compliance, apply a **time-based immutability policy** at the container level with a retention interval matching your compliance requirements (e.g., 90 days).
 - Use **legal hold** if litigation hold is needed.
 - Enable **soft delete** (14-day retention) for accidental deletion recovery.
 
-### 9.5 Storage Account Configuration
+### 9.4 Storage Account Configuration
 
 | Setting                    | Value                                   |
 |----------------------------|-----------------------------------------|
 | Account kind               | StorageV2 (general-purpose v2)          |
-| Replication                | RA-GRS (Read-Access Geo-Redundant)      |
+| Replication                | LRS (Locally Redundant Storage)         |
 | Access tier (default)      | Hot                                     |
 | Blob versioning            | Enabled                                 |
 | Soft delete (blobs)        | Enabled, 14 days                        |
 | Soft delete (containers)   | Enabled, 14 days                        |
-| Hierarchical namespace     | Disabled (standard Blob, not ADLS Gen2) |
+| Hierarchical namespace     | Enabled (ADLS Gen2)                     |
 | Minimum TLS version        | TLS 1.2                                 |
 | Public network access      | Enabled; data access controlled by Entra ID/RBAC |
 | Infrastructure encryption  | Enabled (double encryption)             |
@@ -758,7 +724,7 @@ All log entries must include these custom dimensions:
 | `HttpStatusCode`       | `200` / `429`                        | Response status                  |
 | `DurationMs`           | `2444`                               | Call latency                     |
 | `RecordCount`          | `142`                                | Items returned                   |
-| `BlobPath`             | `partner-data-raw/.../file.json`     | Where data was stored            |
+| `BlobPath`             | `mpc-insights-data-raw/.../file.json` | Where data was stored            |
 
 ### 11.3 Custom Metrics
 
@@ -839,7 +805,7 @@ For local development, `scripts/Initialize-LocalDevelopment.ps1` can update an e
 |---------------------------------|-----------------------------------------------------------|-------------------------------|
 | `regapp-certificate-hso-mpc-integration` | X.509 cert for multi-tenant app authentication            | Auto-rotate via KV policy, 12mo |
 | `refresh-token-{tenantId}`      | Stored refresh tokens for App+User endpoints              | Monitored, re-consent if expired |
-| `partner-config`                | JSON array of enabled partner accounts and auth mode      | Manual update on partner-account changes |
+| `tenants-config`                | JSON array of enabled partner tenants and `CollectPartnerInsights` / `CollectPartnerSecurityScore` flags | Manual update on partner-account changes |
 
 ### 12.4 Additional Security Controls
 
@@ -849,8 +815,6 @@ For local development, `scripts/Initialize-LocalDevelopment.ps1` can update an e
 | Enforce HTTPS-only                   | `supportsHttpsTrafficOnly: true`                                  |
 | Minimum TLS version                  | `minimumTlsVersion: TLS1_2`                                      |
 | Diagnostic logging                   | Enable diagnostic settings on all resources → Log Analytics       |
-| Azure Policy                         | Apply policies: deny public endpoints, enforce encryption, etc.   |
-| Microsoft Defender for Cloud         | Enable Defender for Storage, Key Vault, and App Service           |
 | Managed Identity only                | No service principal passwords in code or config                  |
 
 ---
@@ -864,7 +828,7 @@ For local development, `scripts/Initialize-LocalDevelopment.ps1` can update an e
 | Azure Functions                    | Windows Elastic Premium EP1      | ~$150                        |
 | Azure Functions (optional if pinned to PowerShell 7.4) | Windows Consumption or Flex-compatible redesign | workload-dependent |
 | Azure Key Vault                    | Premium (HSM-backed)             | ~$5 + $0.03/10K ops          |
-| Azure Blob Storage                 | StorageV2, RA-GRS                | $20 – $60 (depends on volume)|
+| Azure Blob Storage                 | StorageV2, LRS                  | $20 – $60 (depends on volume)|
 | Application Insights               | Workspace-based, pay-per-GB      | $10 – $30                    |
 | Log Analytics Workspace            | Pay-per-GB ingestion             | $5 – $15                     |
 | **Total (PowerShell 7.6 / EP1)**   |                                  | **~$190 – $290/month**       |
@@ -874,12 +838,8 @@ For local development, `scripts/Initialize-LocalDevelopment.ps1` can update an e
 | Technique                                          | Savings                                             |
 |----------------------------------------------------|-----------------------------------------------------|
 | Pin to PowerShell 7.4 until 7.6 reaches GA          | Opens lower-cost hosting options if preview runtime is not required |
-| Blob lifecycle policies (Hot → Cool → Archive)     | Up to 80% on storage for data older than 7 days     |
 | Application Insights adaptive sampling             | Reduces ingestion cost by 50%+                      |
-| Daily cost cap on Application Insights             | Prevents unexpected spikes                          |
-| Reserved capacity for Blob Storage (1yr/3yr)       | 20-38% discount on storage capacity                 |
-| Incremental collection (delta queries where available) | Reduces API calls and blob writes significantly |
-| Skip unchanged executions and static catalogs       | Avoids re-downloading completed report data         |
+| Partner-global collection                           | Avoids per-customer fan-out while still collecting the complete partner dataset |
 
 ### 13.3 Endpoint Collection Frequency Optimization
 
@@ -888,9 +848,9 @@ Because collection is **partner-global**, volume is driven by *datasets + score 
 | Frequency | Items                                                                                  |
 |-----------|----------------------------------------------------------------------------------------|
 | Every 6h  | Partner Security Score, requirements, customerInsights                                  |
-| Daily     | Security score history; all Insights datasets/queries catalog; all Insights report downloads |
+| Every 4h UTC | Security score history; all Insights datasets/queries catalog; all Insights report downloads |
 
-The Insights report `RecurrenceInterval` minimum is **4 hours** and the underlying analytics refresh daily/monthly, so hourly Insights collection is neither possible nor useful. With ~20 datasets + 4 score endpoints collected once at the partner level, a cycle issues on the order of **tens** of API calls — versus the thousands/day implied by the previous per-customer commerce-API fan-out. Execution-level de-duplication (`executionId` markers) avoids re-downloading unchanged report data.
+The Insights report `RecurrenceInterval` minimum is **4 hours**, so the collection cadence is fixed at 00/04/08/12/16/20 UTC. Scheduled reports use `RecurrenceCount = 2190`, which is one year of 4-hour executions. With ~20 datasets + 4 score endpoints collected once at the partner level, a cycle issues on the order of **tens** of API calls — versus the thousands/day implied by the previous per-customer commerce-API fan-out. The solution deliberately performs full-cycle collection: all catalogs and the latest report execution for every dataset are written each cycle.
 
 ---
 
@@ -942,7 +902,7 @@ hso-mpc-integrations-multitenant/
 │       ├── CollectInsights/                  # Activity: full Insights async flow -> JSON
 │       │   ├── function.json
 │       │   └── run.ps1
-│       ├── LoadTenantConfig/                 # Activity: read partner-config KV secret
+│       ├── LoadTenantConfig/                 # Activity: read tenants-config KV secret
 │       │   ├── function.json
 │       │   └── run.ps1
 │       ├── LoadEndpointRegistry/             # Activity: import registry
@@ -956,7 +916,7 @@ hso-mpc-integrations-multitenant/
 │           ├── TokenService.psm1             # JWT assertion + token acquisition
 │           ├── ApiClient.psm1                # Retry/throttle core + Graph pagination
 │           ├── InsightsClient.psm1           # Insights async flow + CSV/TSV -> JSON
-│           ├── BlobStorageService.psm1       # JSON blob writes (data + metadata) + markers
+│           ├── BlobStorageService.psm1       # JSON blob writes (data + metadata sidecars)
 │           └── EndpointRegistry.psd1         # Security-score + Insights collection registry
 ├── tests/                                    # Pester 5 test suites
 ├── scripts/
@@ -977,7 +937,7 @@ Use **Azure Bicep** for all infrastructure deployment. Key module responsibiliti
 | Module                  | Resources Created                                              |
 |-------------------------|----------------------------------------------------------------|
 | `function-app.bicep`    | Function App, App Service Plan (EP1), System MI                |
-| `storage.bicep`         | Storage Account, Containers, Lifecycle Policy, RBAC-friendly public endpoint |
+| `storage.bicep`         | Storage Account, containers, RBAC-friendly public endpoint |
 | `keyvault.bicep`        | Key Vault Premium, RBAC, diagnostics, public authenticated endpoint |
 | `monitoring.bicep`      | App Insights, Log Analytics, Alert Rules, Action Groups        |
 
@@ -1013,7 +973,7 @@ jobs:
           Invoke-Pester -Path ./tests -CI
   package:
     needs: [lint-powershell, test-powershell]
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - shell: pwsh
@@ -1038,9 +998,111 @@ The package artifact is intentionally built from staged files instead of directl
 1. Obtain the tenant ID and display name.
 2. A Global Admin or Privileged Role Administrator in the partner tenant navigates to the admin consent URL (see §5.2).
 3. Perform the Secure Application Model partner consent flow with `scripts/Initialize-SecureAppConsent.ps1` and store the refresh token in Key Vault.
-4. Add the partner account to the `partner-config` Key Vault secret or App Configuration with `InsightsAuthMode: AppPlusUser`.
+4. Add the partner account to the `tenants-config` Key Vault secret or App Configuration, setting `CollectPartnerInsights` and `CollectPartnerSecurityScore` for the desired data sources.
 5. Run `scripts/Verify-TenantConsent.ps1` to confirm permissions, refresh-token exchange, MFA validation, and API access.
 6. The next scheduled cycle automatically picks up the new partner account.
+
+#### `tenants-config` examples
+
+Both collection flags default to `true` when omitted. Set them explicitly for clarity when onboarding or changing a tenant.
+
+**Collect both Partner Insights and Partner Security Score**
+
+```json
+[
+  {
+    "TenantId": "<partner-tenant-guid>",
+    "DisplayName": "HSO Production",
+    "Enabled": true,
+    "MpnId": "123456",
+    "CollectPartnerInsights": true,
+    "CollectPartnerSecurityScore": true
+  }
+]
+```
+
+**Collect only Microsoft Partner Insights**
+
+Use this when the tenant should produce Insights datasets, queries, and report exports, but should not call Microsoft Graph Partner Security Score endpoints.
+
+```json
+[
+  {
+    "TenantId": "<partner-tenant-guid>",
+    "DisplayName": "Insights only partner",
+    "Enabled": true,
+    "MpnId": "123456",
+    "CollectPartnerInsights": true,
+    "CollectPartnerSecurityScore": false
+  }
+]
+```
+
+**Collect only CSP Partner Security Score**
+
+Use this when only Microsoft Graph Partner Security Score data is required. This tenant does not need a Secure Application Model refresh token unless Partner Insights is later enabled.
+
+```json
+[
+  {
+    "TenantId": "<partner-tenant-guid>",
+    "DisplayName": "Security score only partner",
+    "Enabled": true,
+    "MpnId": "123456",
+    "CollectPartnerInsights": false,
+    "CollectPartnerSecurityScore": true
+  }
+]
+```
+
+**Mixed tenants in one secret**
+
+```json
+[
+  {
+    "TenantId": "<tenant-guid-1>",
+    "DisplayName": "Full collection partner",
+    "Enabled": true,
+    "MpnId": "123456",
+    "CollectPartnerInsights": true,
+    "CollectPartnerSecurityScore": true
+  },
+  {
+    "TenantId": "<tenant-guid-2>",
+    "DisplayName": "Insights only partner",
+    "Enabled": true,
+    "MpnId": "234567",
+    "CollectPartnerInsights": true,
+    "CollectPartnerSecurityScore": false
+  },
+  {
+    "TenantId": "<tenant-guid-3>",
+    "DisplayName": "Security score only partner",
+    "Enabled": true,
+    "MpnId": "345678",
+    "CollectPartnerInsights": false,
+    "CollectPartnerSecurityScore": true
+  },
+  {
+    "TenantId": "<tenant-guid-4>",
+    "DisplayName": "Temporarily disabled partner",
+    "Enabled": false,
+    "MpnId": "456789",
+    "CollectPartnerInsights": true,
+    "CollectPartnerSecurityScore": true
+  }
+]
+```
+
+Store the JSON in Key Vault:
+
+```powershell
+$tenantsConfigJson = Get-Content -Path .\tenants-config.json -Raw
+Set-AzKeyVaultSecret `
+  -VaultName <kv-name> `
+  -Name 'tenants-config' `
+  -SecretValue (ConvertTo-SecureString -String $tenantsConfigJson -AsPlainText -Force)
+```
 
 ### 15.2 Certificate Rotation
 
@@ -1051,6 +1113,14 @@ The package artifact is intentionally built from staged files instead of directl
 5. Verify token acquisition works for all 35 tenants.
 
 ### 15.3 Refresh Token Re-consent
+
+Full re-consent cannot be automated. The Secure Application Model App+User flow requires an interactive delegated sign-in by a Partner Center user with MFA, so a revoked or expired refresh token cannot be replaced by the Function App, managed identity, CI/CD, or an unattended job.
+
+What can be automated:
+
+1. Keep active refresh tokens alive with `scripts/Update-RefreshToken.ps1` on a scheduled job for tenants where `CollectPartnerInsights=true`.
+2. Alert on token redemption failures such as `invalid_grant`, persistent 401, or Partner Center MFA validation failure.
+3. Skip refresh-token renewal for tenants where `CollectPartnerInsights=false`; Security Score-only tenants use Microsoft Graph app-only auth and do not need a Secure Application Model refresh token, provided the app-only Partner Security Score path is authorized in Partner Center.
 
 If a refresh token expires or is revoked:
 
@@ -1085,28 +1155,20 @@ scripts/Initialize-SecureAppConsent.ps1 -KeyVaultName <kv> -ClientId <client-id>
 | Secret Name                              | Content                                  |
 |------------------------------------------|------------------------------------------|
 | `regapp-certificate-hso-mpc-integration` | X.509 certificate (PFX)                 |
-| `partner-config`                         | JSON: `[{TenantId, DisplayName, Enabled, InsightsAuthMode, MpnId}]` |
+| `tenants-config`                         | JSON: `[{TenantId, DisplayName, Enabled, MpnId, CollectPartnerInsights, CollectPartnerSecurityScore}]` |
 | `refresh-token-{tenant-id}`              | OAuth2 refresh token (Secure App Model)  |
 
-### Appendix C: Azure Policy Assignments
-
-| Policy                                                    | Effect  |
-|-----------------------------------------------------------|---------|
-| Function apps should use managed identity                 | Audit   |
-| Storage accounts should use customer-managed key          | Audit   |
-| Require minimum TLS 1.2 for storage accounts              | Deny    |
-
-### Appendix D: Well-Architected Framework Alignment
+### Appendix C: Well-Architected Framework Alignment
 
 | Pillar                    | Key Design Decisions                                                                                |
 |---------------------------|------------------------------------------------------------------------------------------------------|
-| **Reliability**           | Durable Functions checkpointing, per-endpoint retry, circuit breaker per partner account, RA-GRS storage |
-| **Security**              | Secure Application Model App+User for Partner Center, certificate credentials, Managed Identity, RBAC, Key Vault, TLS 1.2, Defender for Cloud |
-| **Cost Optimization**     | Partner-global collection, lifecycle tiering, collection frequency optimization, adaptive sampling |
+| **Reliability**           | Durable Functions checkpointing, per-endpoint retry, circuit breaker per partner account, LRS storage |
+| **Security**              | Secure Application Model App+User for Partner Center, certificate credentials, Managed Identity, RBAC, Key Vault, TLS 1.2 |
+| **Cost Optimization**     | Partner-global collection, collection frequency optimization, adaptive sampling |
 | **Operational Excellence**| Structured logging, custom metrics, dashboards, automated alerting, IaC, CI/CD, runbooks           |
 | **Performance Efficiency**| Fan-out/fan-in parallelism, per-partner concurrency control, stateless access-token acquisition, pagination handling |
 
-### Appendix E: References
+### Appendix D: References
 
 - [programmatic access to analytics data](https://learn.microsoft.com/en-us/partner-center/insights/insights-programmatic-get-started)
 - [Partner Center Datasets API](https://learn.microsoft.com/en-us/partner-center/insights/insights-programmatic-analytics-api-get-dataset)
@@ -1116,7 +1178,6 @@ scripts/Initialize-SecureAppConsent.ps1 -KeyVaultName <kv> -ClientId <client-id>
 - [Partner Security Requirements](https://learn.microsoft.com/en-us/partner-center/security/partner-security-requirements)
 - [Partner Center API Scenarios](https://learn.microsoft.com/en-us/partner-center/developer/scenarios)
 - [Microsoft Graph API — Use the API](https://learn.microsoft.com/en-us/graph/use-the-api)
-- [Azure Blob Storage Lifecycle Management](https://learn.microsoft.com/en-us/azure/storage/blobs/lifecycle-management-overview)
 
 ---
 

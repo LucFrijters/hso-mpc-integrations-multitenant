@@ -438,6 +438,34 @@ if (-not $SkipCode) {
 
     Write-Ok "Code deployed to $functionAppName"
 
+    foreach ($legacySettingName in @(
+            'TIMER_SCHEDULE'
+            'INSIGHTS_DAILY_HOUR_UTC'
+            'INSIGHTS_AUTH_MODE'
+            'INSIGHTS_ENSURE_ALL_DATASETS'
+            'INSIGHTS_RECURRENCE_HOURS'
+            'INSIGHTS_RECURRENCE_COUNT'
+        )) {
+        $legacySettingCount = az functionapp config appsettings list `
+            --resource-group $ResourceGroupName `
+            --name $functionAppName `
+            --query "[?name=='$legacySettingName'] | length(@)" `
+            --output tsv 2>$null
+
+        if ($legacySettingCount -and [int]$legacySettingCount -gt 0) {
+            Write-Host "  Removing legacy $legacySettingName app setting..." -ForegroundColor Yellow
+
+            az functionapp config appsettings delete `
+                --resource-group $ResourceGroupName `
+                --name $functionAppName `
+                --setting-names $legacySettingName `
+                --output none
+
+            Assert-ExitCode "az functionapp config appsettings delete $legacySettingName"
+            Write-Ok "Removed legacy $legacySettingName app setting"
+        }
+    }
+
     Write-Host "  Waiting 30 seconds for the host to restart..." -ForegroundColor Gray
     Start-Sleep -Seconds 30
 
@@ -522,8 +550,8 @@ Write-Host ""
 Write-Host "  [ ] 1. Upload the certificate to Key Vault (creates the 'regapp-certificate-hso-mpc-integration' secret):"
 Write-Host "         .\scripts\Rotate-Certificate.ps1 -KeyVaultName <kv-name> -ClientId $AppClientId" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  [ ] 2. Store partner-account configuration in Key Vault (secret name: 'partner-config'):"
-Write-Host "         JSON format: [{""TenantId"":""<guid>"",""DisplayName"":""HSO Production"",""Enabled"":true,""InsightsAuthMode"":""AppPlusUser"",""MpnId"":""123456""}]" -ForegroundColor Gray
+Write-Host "  [ ] 2. Store tenant configuration in Key Vault (secret name: 'tenants-config'):"
+Write-Host "         JSON format: [{""TenantId"":""<guid>"",""DisplayName"":""HSO Production"",""Enabled"":true,""MpnId"":""123456"",""CollectPartnerInsights"":true,""CollectPartnerSecurityScore"":true}]" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  [ ] 3. Grant admin consent in each partner account:"
 Write-Host "         .\scripts\Grant-AdminConsent.ps1 -TenantId <tenant-guid> -ClientId $AppClientId" -ForegroundColor Gray
@@ -537,8 +565,9 @@ Write-Host ""
 Write-Host "  [ ] 6. Configure local development against the main Key Vault (optional):"
 Write-Host "         .\scripts\Initialize-LocalDevelopment.ps1 -Environment $Environment -AppClientId $AppClientId -ValidateKeyVaultAccess" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  [ ] 7. Trigger the first collection cycle manually (optional — otherwise waits for the TIMER_SCHEDULE cycle):"
-Write-Host "         az rest --method post --url 'https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.Web/sites/$functionAppName/hostruntime/admin/functions/TimerStart/trigger?api-version=2022-03-01' --body '{}'" -ForegroundColor Gray
+Write-Host "  [ ] 7. Trigger the first collection cycle manually (optional — otherwise waits for the fixed 2-hour timer cycle):"
+Write-Host "         `$manualKey = az functionapp function keys list --resource-group $ResourceGroupName --name $functionAppName --function-name ManualStart --query default --output tsv" -ForegroundColor Gray
+Write-Host "         Invoke-RestMethod -Method Post -Uri `"https://$functionAppName.azurewebsites.net/api/collection/start?code=`$manualKey`"" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  [ ] 8. Monitor the orchestration in Application Insights:"
 Write-Host "         Azure Portal → Function App → Monitor → Live Metrics" -ForegroundColor Gray

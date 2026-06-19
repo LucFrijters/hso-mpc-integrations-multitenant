@@ -10,8 +10,8 @@
       4. Convert the CSV/TSV report payload to JSON for blob storage.
 
     Resilience: all HTTP goes through Invoke-ApiWithRetry (429/5xx/Retry-After aware).
-    Efficiency: reports are created once and reused; the latest execution is downloaded and
-    de-duplicated by executionId so unchanged data is not re-written.
+    Collection: reports are created once and reused; the latest completed execution is downloaded
+    and stored every collection cycle so the blob store always has a full run snapshot.
 
     Requires ApiClient.psm1 (Invoke-ApiWithRetry) and IntegrationConfig.psm1 to be imported.
 #>
@@ -367,7 +367,7 @@ function Resolve-InsightsReportsToCollect {
             DatasetName   = $r.DatasetName
             SystemQueryId = $r.SystemQueryId
             CustomQuery   = $null
-            Frequency     = ($r.Frequency ?? 'Daily')
+            Frequency     = ($r.Frequency ?? 'Every4h')
             Source        = 'registry'
         }
     }
@@ -384,7 +384,7 @@ function Resolve-InsightsReportsToCollect {
                 DatasetName   = $name
                 SystemQueryId = $null
                 CustomQuery   = (New-DatasetSelectQuery -DatasetName $name -Columns $cols)
-                Frequency     = 'Daily'
+                Frequency     = 'Every4h'
                 Source        = 'auto'
             }
         }

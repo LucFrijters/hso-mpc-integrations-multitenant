@@ -10,8 +10,8 @@ param($InputData)
       1. Enumerate datasets (/ScheduledDataset) and queries (/ScheduledQueries) -> store as JSON.
       2. Resolve the set of reports to collect (registry + every other dataset when EnsureAllDatasets).
       3. Idempotently ensure a scheduled report exists per dataset (create query + report if missing).
-      4. Download the latest COMPLETED execution per report, de-duplicated by executionId, and
-         convert the CSV/TSV payload to JSON before storing.
+        4. Download the latest COMPLETED execution per report and convert the CSV/TSV payload to
+            JSON before storing. The latest execution is stored every collection cycle.
 
     Input:
         CorrelationId   : string
@@ -52,7 +52,6 @@ $summary = @{
     ReportsCreated    = 0
     ReportsDownloaded = 0
     ReportsPending    = 0
-    ReportsSkipped    = 0
     Failures          = 0
     Details           = @()
 }
@@ -134,15 +133,6 @@ foreach ($def in @($reportDefs)) {
             continue
         }
 
-        # Execution-level idempotency: skip if this execution was already collected.
-        $markerPath = "_insights-state/$tenantId/$($reg.ReportId)/$($exec.executionId).json"
-        if (Test-BlobExists -BlobPath $markerPath) {
-            $summary.ReportsSkipped++
-            $summary.Details += @{ Item = "report:$dataset"; Status = 'Skipped'; ExecutionId = $exec.executionId }
-            Write-Host "$logPrefix report '$dataset': execution $($exec.executionId) already collected (skip)"
-            continue
-        }
-
         $data = Get-InsightsReportData -Execution $exec -Config $config
         if (-not $data) {
             $summary.ReportsPending++
@@ -168,13 +158,9 @@ foreach ($def in @($reportDefs)) {
             collectionCompletedUtc = [DateTimeOffset]::UtcNow.ToString('o')
         }
 
-        $blobResult = Write-CollectionToBlob -TenantId $tenantId -TenantName $tenantName `
+        Write-CollectionToBlob -TenantId $tenantId -TenantName $tenantName `
             -Endpoint $reportEndpoint -JsonPayload $data.Json -Metadata $metadata `
-            -TimestampUtc $timestamp -FileNameSuffix $data.ExecutionId
-
-        # Write the idempotency marker only after a successful store.
-        $markerContent = @{ collectedUtc = [DateTimeOffset]::UtcNow.ToString('o'); blobPath = $blobResult.BlobPath; rowCount = $data.RowCount } | ConvertTo-Json -Compress
-        Write-StringToBlob -BlobPath $markerPath -Content $markerContent -ContentType 'application/json'
+            -TimestampUtc $timestamp -FileNameSuffix $data.ExecutionId | Out-Null
 
         $summary.ReportsDownloaded++
         $summary.Details += @{ Item = "report:$dataset"; Status = 'Downloaded'; ExecutionId = $data.ExecutionId; RowCount = $data.RowCount }
@@ -188,11 +174,11 @@ foreach ($def in @($reportDefs)) {
     }
 }
 
-$status = if ($summary.Failures -gt 0 -and ($summary.ReportsDownloaded + $summary.ReportsSkipped) -eq 0 -and -not $summary.DatasetsStored) { 'Failed' }
+$status = if ($summary.Failures -gt 0 -and $summary.ReportsDownloaded -eq 0 -and -not $summary.DatasetsStored) { 'Failed' }
 elseif ($summary.Failures -gt 0) { 'Partial' }
 else { 'Succeeded' }
 
-Write-Host "$logPrefix CollectInsights: $status | datasets=$($summary.DatasetCount) queries=$($summary.QueryCount) created=$($summary.ReportsCreated) downloaded=$($summary.ReportsDownloaded) pending=$($summary.ReportsPending) skipped=$($summary.ReportsSkipped) failures=$($summary.Failures)"
+Write-Host "$logPrefix CollectInsights: $status | datasets=$($summary.DatasetCount) queries=$($summary.QueryCount) created=$($summary.ReportsCreated) downloaded=$($summary.ReportsDownloaded) pending=$($summary.ReportsPending) failures=$($summary.Failures)"
 
 return @{
     EndpointName    = 'partner-insights'

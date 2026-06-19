@@ -4,7 +4,7 @@
       "name": "Timer",
       "type": "timerTrigger",
       "direction": "in",
-      "schedule": "%TIMER_SCHEDULE%"
+      "schedule": "0 0 */2 * * *"
     },
     {
       "name": "StarterClient",

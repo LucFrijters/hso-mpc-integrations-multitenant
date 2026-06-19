@@ -18,13 +18,13 @@ Describe 'EndpointRegistry — Partner Security Score (CSP scores)' {
             $ep.Keys | Should -Contain 'Path'
             $ep.ApiSurface | Should -Be 'graph-beta'
             $ep.Path | Should -Match '^/security/partner/securityScore'
-            $ep.Frequency | Should -BeIn @('Hourly', 'Every6h', 'Daily')
+            $ep.Frequency | Should -BeIn @('Hourly', 'Every4h', 'Every6h')
         }
     }
 
     It 'includes customerInsights (all CSP customers in one call)' {
         ($script:Registry.SecurityScoreEndpoints | Where-Object { $_.Path -like '*customerInsights' }).Count |
-            Should -BeGreaterOrEqual 1
+        Should -BeGreaterOrEqual 1
     }
 
     It 'covers score, requirements and history' {
@@ -36,7 +36,7 @@ Describe 'EndpointRegistry — Partner Security Score (CSP scores)' {
 
     It 'does NOT reference the non-existent securityAlerts endpoint' {
         ($script:Registry.SecurityScoreEndpoints | Where-Object { $_.Path -match 'securityAlerts' }).Count |
-            Should -Be 0
+        Should -Be 0
     }
 }
 

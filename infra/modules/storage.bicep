@@ -1,14 +1,29 @@
 // ============================================================================
-// Storage module — existing Storage Account, container, lifecycle policy
+// Storage module — Storage Account and container
 // ============================================================================
 
 param storageAccountName string
+param location string
+param tags object
 
 var containerName = 'mpc-insights-data-raw'
 
-// --- Existing Storage Account ---
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+// --- Storage Account ---
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
+  location: location
+  tags: tags
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+  properties: {
+    accessTier: 'Hot'
+    isHnsEnabled: true
+    supportsHttpsTrafficOnly: true
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+  }
 }
 
 // --- Blob Services config ---
@@ -36,39 +51,6 @@ resource container 'Microsoft.Storage/storageAccounts/blobServices/containers@20
     publicAccess: 'None'
   }
 }
-
-// // --- Lifecycle Management Policy ---
-// resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
-//   parent: storageAccount
-//   name: 'default'
-//   properties: {
-//     policy: {
-//       rules: [
-//         {
-//           name: 'tier-to-cool-after-7-days'
-//           enabled: true
-//           type: 'Lifecycle'
-//           definition: {
-//             filters: {
-//               blobTypes: ['blockBlob']
-//               prefixMatch: ['${containerName}/']
-//             }
-//             actions: {
-//               baseBlob: {
-//                 tierToCool: { daysAfterModificationGreaterThan: 7 }
-//                 tierToArchive: { daysAfterModificationGreaterThan: 90 }
-//                 delete: { daysAfterModificationGreaterThan: 365 }
-//               }
-//               snapshot: {
-//                 delete: { daysAfterCreationGreaterThan: 90 }
-//               }
-//             }
-//           }
-//         }
-//       ]
-//     }
-//   }
-// }
 
 // --- Outputs ---
 output storageAccountName string = storageAccount.name

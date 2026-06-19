@@ -6,15 +6,16 @@
     Reuses the function-app modules (TokenService, ApiClient, InsightsClient, IntegrationConfig)
     so the verification exercises exactly the same code paths as the runtime collection.
 
-    For each partner account in 'partner-config' it:
+     For each partner account in 'tenants-config' it respects CollectPartnerInsights and
+     CollectPartnerSecurityScore, then:
       1. Loads the certificate from Key Vault.
-      2. Acquires a Partner Insights token and calls GET /ScheduledDataset. For AppPlusUser
-         partners (the default, Secure App Model) it redeems the stored refresh token exactly as
-         the runtime does; for AppOnly partners it uses the certificate client-credentials flow.
-      3. Acquires an AppOnly token for Microsoft Graph and calls GET /security/partner/securityScore.
+        2. For Insights-enabled tenants, redeems the stored Secure App Model refresh token and
+            calls GET /ScheduledDataset.
+        3. For Security Score-enabled tenants, acquires an AppOnly token for Microsoft Graph and
+            calls GET /security/partner/securityScore.
 
 .PARAMETER KeyVaultName
-    Name of the Azure Key Vault holding the partner config and certificate.
+    Name of the Azure Key Vault holding the tenants config and certificate.
 
 .PARAMETER ClientId
     The Application (client) ID of the multi-tenant app registration.
@@ -22,8 +23,8 @@
 .PARAMETER CertificateName
     Name of the certificate in Key Vault. Default: regapp-certificate-hso-mpc-integration
 
-.PARAMETER PartnerConfigSecretName
-    Name of the Key Vault secret holding partner-account JSON. Default: partner-config
+.PARAMETER TenantsConfigSecretName
+    Name of the Key Vault secret holding tenant JSON. Default: tenants-config
 
 .EXAMPLE
     .\Verify-TenantConsent.ps1 -KeyVaultName "kv-hso-mpc-integration" -ClientId "11111111-1111-1111-1111-111111111111"
@@ -40,7 +41,7 @@ param (
 
     [string]$CertificateName = 'regapp-certificate-hso-mpc-integration',
 
-    [string]$PartnerConfigSecretName = 'partner-config'
+    [string]$TenantsConfigSecretName = 'tenants-config'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -56,9 +57,9 @@ Write-Host "Key Vault : $KeyVaultName"
 Write-Host "Client ID : $ClientId"
 Write-Host ""
 
-# Step 1: partner configuration
-Write-Host "[1/3] Loading partner configuration ($PartnerConfigSecretName)..." -ForegroundColor Yellow
-$configSecret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $PartnerConfigSecretName -AsPlainText
+# Step 1: tenants configuration
+Write-Host "[1/3] Loading tenants configuration ($TenantsConfigSecretName)..." -ForegroundColor Yellow
+$configSecret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $TenantsConfigSecretName -AsPlainText
 $partners = @($configSecret | ConvertFrom-Json)
 Write-Host "  Found $($partners.Count) partner account(s)."
 Write-Host ""
@@ -81,23 +82,32 @@ $results = @()
 foreach ($p in $partners) {
     $tenantId = $p.TenantId
     $displayName = $p.DisplayName ?? $tenantId
-    $authMode = $p.InsightsAuthMode ?? 'AppPlusUser'
+    $authMode = 'AppPlusUser'
+    $collectPartnerInsights = $p.CollectPartnerInsights -ne $false
+    $collectPartnerSecurityScore = $p.CollectPartnerSecurityScore -ne $false
 
     $r = [PSCustomObject]@{
-        DisplayName         = $displayName
-        TenantId            = $tenantId
-        InsightsAuthMode    = $authMode
-        InsightsTokenStatus = 'UNTESTED'
-        InsightsApiStatus   = 'UNTESTED'
-        GraphTokenStatus    = 'UNTESTED'
-        GraphApiStatus      = 'UNTESTED'
-        Errors              = @()
+        DisplayName                 = $displayName
+        TenantId                    = $tenantId
+        CollectPartnerInsights      = $collectPartnerInsights
+        CollectPartnerSecurityScore = $collectPartnerSecurityScore
+        InsightsAuthMode            = $authMode
+        InsightsTokenStatus         = 'UNTESTED'
+        InsightsApiStatus           = 'UNTESTED'
+        GraphTokenStatus            = 'UNTESTED'
+        GraphApiStatus              = 'UNTESTED'
+        Errors                      = @()
     }
 
     Write-Host "  --- $displayName ($tenantId) ---" -ForegroundColor Cyan
 
-    # Partner Insights (AppOnly path; AppPlusUser flagged for refresh-token verification)
-    if ($authMode -eq 'AppPlusUser') {
+    # Partner Insights (Secure App Model App+User)
+    if (-not $collectPartnerInsights) {
+        $r.InsightsTokenStatus = 'SKIPPED'
+        $r.InsightsApiStatus = 'SKIPPED'
+        Write-Host '    - Insights verification skipped (CollectPartnerInsights=false)' -ForegroundColor Gray
+    }
+    elseif ($authMode -eq 'AppPlusUser') {
         # Secure App Model: redeem the stored refresh token exactly as the runtime does.
         try {
             $secretName = Get-RefreshTokenSecretName -TenantId $tenantId
@@ -149,25 +159,32 @@ foreach ($p in $partners) {
     }
 
     # Microsoft Graph — Partner Security Score (AppOnly, PartnerSecurity.Read.All)
-    try {
-        $gtok = Get-MultiTenantAccessToken -ClientId $ClientId -TenantId $tenantId -Certificate $cert -Scope $graphScope
-        $r.GraphTokenStatus = 'OK'
-        Write-Host "    ✓ Graph token acquired" -ForegroundColor Green
+    if (-not $collectPartnerSecurityScore) {
+        $r.GraphTokenStatus = 'SKIPPED'
+        $r.GraphApiStatus = 'SKIPPED'
+        Write-Host '    - Graph security score verification skipped (CollectPartnerSecurityScore=false)' -ForegroundColor Gray
+    }
+    else {
         try {
-            $score = Invoke-GraphBetaApi -Path '/security/partner/securityScore' -AccessToken $gtok.AccessToken
-            $r.GraphApiStatus = "OK ($($score.Records.Count) record)"
-            Write-Host "    ✓ GET /security/partner/securityScore succeeded" -ForegroundColor Green
+            $gtok = Get-MultiTenantAccessToken -ClientId $ClientId -TenantId $tenantId -Certificate $cert -Scope $graphScope
+            $r.GraphTokenStatus = 'OK'
+            Write-Host "    ✓ Graph token acquired" -ForegroundColor Green
+            try {
+                $score = Invoke-GraphBetaApi -Path '/security/partner/securityScore' -AccessToken $gtok.AccessToken
+                $r.GraphApiStatus = "OK ($($score.Records.Count) record)"
+                Write-Host "    ✓ GET /security/partner/securityScore succeeded" -ForegroundColor Green
+            }
+            catch {
+                $r.GraphApiStatus = 'FAILED'
+                $r.Errors += "Graph API: $($_.Exception.Message)"
+                Write-Host "    ✗ Graph API FAILED: $($_.Exception.Message)" -ForegroundColor Red
+            }
         }
         catch {
-            $r.GraphApiStatus = 'FAILED'
-            $r.Errors += "Graph API: $($_.Exception.Message)"
-            Write-Host "    ✗ Graph API FAILED: $($_.Exception.Message)" -ForegroundColor Red
+            $r.GraphTokenStatus = 'FAILED'
+            $r.Errors += "Graph token: $($_.Exception.Message)"
+            Write-Host "    ✗ Graph token FAILED: $($_.Exception.Message)" -ForegroundColor Red
         }
-    }
-    catch {
-        $r.GraphTokenStatus = 'FAILED'
-        $r.Errors += "Graph token: $($_.Exception.Message)"
-        Write-Host "    ✗ Graph token FAILED: $($_.Exception.Message)" -ForegroundColor Red
     }
 
     $results += $r
@@ -175,7 +192,7 @@ foreach ($p in $partners) {
 }
 
 Write-Host "=== Summary ===" -ForegroundColor Cyan
-$results | Select-Object DisplayName, TenantId, InsightsTokenStatus, InsightsApiStatus, GraphTokenStatus, GraphApiStatus | Format-Table -AutoSize
+$results | Select-Object DisplayName, TenantId, CollectPartnerInsights, CollectPartnerSecurityScore, InsightsTokenStatus, InsightsApiStatus, GraphTokenStatus, GraphApiStatus | Format-Table -AutoSize
 
 $failed = $results | Where-Object { $_.Errors.Count -gt 0 }
 if ($failed) {

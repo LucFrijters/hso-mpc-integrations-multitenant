@@ -21,7 +21,7 @@ jobs:
   # ───────────────────────────────────────────────────────
   validate-bicep:
     name: Validate Bicep
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -38,14 +38,15 @@ jobs:
       - name: Validate Bicep (What-If)
         env:
           APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+        shell: pwsh
         run: |
-          az group create \
-            --name rg-hso-mpc-multitenant-integration-dev \
-            --location westeurope \
+          az group create `
+            --name rg-hso-mpc-multitenant-integration-dev `
+            --location westeurope `
             --tags project=hso-mpc-multitenant-integration environment=dev managedBy=bicep
-          az deployment group validate \
-            --resource-group rg-hso-mpc-multitenant-integration-dev \
-            --template-file infra/main.bicep \
+          az deployment group validate `
+            --resource-group rg-hso-mpc-multitenant-integration-dev `
+            --template-file infra/main.bicep `
             --parameters infra/parameters/dev.bicepparam
 
   # ───────────────────────────────────────────────────────
@@ -121,7 +122,7 @@ jobs:
   package:
     name: Package Function App
     needs: [validate-bicep, lint-powershell, test-powershell]
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 

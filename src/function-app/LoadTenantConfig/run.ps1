@@ -2,28 +2,29 @@ param($InputData)
 
 <#
 .SYNOPSIS
-    Activity function: loads the partner-account configuration from Azure Key Vault.
+    Activity function: loads the tenant configuration from Azure Key Vault.
 
     Returns an array of partner accounts (typically one: the HSO Production Partner Center).
-    Each entry: TenantId, DisplayName, Enabled, InsightsAuthMode, MpnId.
+    Each entry: TenantId, DisplayName, Enabled, MpnId, CollectPartnerInsights,
+    CollectPartnerSecurityScore. Collection flags default to true when omitted.
 
     NOTE: These are PARTNER tenants, not CSP customer tenants. Customer data is contained
     within the partner-global Insights datasets and the security score's customerInsights,
     so customer tenants are NOT iterated here.
 
-    Key Vault secret 'partner-config' JSON shape (InsightsAuthMode is optional and defaults to
-    the Secure App Model 'AppPlusUser' required by Partner Center APIs):
+    Key Vault secret 'tenants-config' JSON shape:
         [ { "TenantId": "...", "DisplayName": "HSO Production", "Enabled": true,
-            "InsightsAuthMode": "AppPlusUser", "MpnId": "123456" } ]
+            "MpnId": "123456", "CollectPartnerInsights": true,
+            "CollectPartnerSecurityScore": true } ]
 #>
 
 $correlationId = $InputData
-Write-Host "[$correlationId] LoadTenantConfig: loading partner-account configuration from Key Vault"
+Write-Host "[$correlationId] LoadTenantConfig: loading tenant configuration from Key Vault"
 
 try {
     $config = Get-IntegrationConfig
     $vaultName = $config.KeyVaultName
-    $secretName = $config.PartnerConfigSecretName
+    $secretName = $config.TenantsConfigSecretName
 
     $secret = Invoke-WithRetry -OperationName "KeyVaultRead:$secretName" -ScriptBlock {
         Get-AzKeyVaultSecret -VaultName $vaultName -Name $secretName -AsPlainText
@@ -38,18 +39,20 @@ try {
             continue
         }
         $validPartners += @{
-            TenantId         = $p.TenantId
-            DisplayName      = $p.DisplayName ?? "partner-$($p.TenantId.Substring(0,8))"
-            Enabled          = $p.Enabled -ne $false           # default enabled
-            InsightsAuthMode = $p.InsightsAuthMode ?? $config.Insights.AuthMode
-            MpnId            = $p.MpnId
+            TenantId                    = $p.TenantId
+            DisplayName                 = $p.DisplayName ?? "partner-$($p.TenantId.Substring(0,8))"
+            Enabled                     = $p.Enabled -ne $false           # default enabled
+            MpnId                       = $p.MpnId
+            CollectPartnerInsights      = $p.CollectPartnerInsights -ne $false
+            CollectPartnerSecurityScore = $p.CollectPartnerSecurityScore -ne $false
         }
     }
 
     Write-Host "[$correlationId] LoadTenantConfig: loaded $($validPartners.Count) partner account(s)"
     return $validPartners
 
-} catch {
+}
+catch {
     Write-Host "[$correlationId] LoadTenantConfig: ERROR - $($_.Exception.Message)"
     throw
 }

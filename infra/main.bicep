@@ -18,7 +18,7 @@ param location string = rgLocation
 @description('Base name for resources')
 param baseName string = 'hso-mpc-integration'
 
-@description('Name of the pre-created data storage account in this resource group')
+@description('Name of the data storage account in this resource group')
 param storageAccountName string = 'sthsompcintegrationprd'
 
 @description('Name of the pre-created Key Vault in this resource group')
@@ -56,6 +56,8 @@ module storage 'modules/storage.bicep' = {
   scope: targetResourceGroup
   params: {
     storageAccountName: storageAccountName
+    location: location
+    tags: tags
   }
 }
 
@@ -84,8 +86,6 @@ module functionApp 'modules/function-app.bicep' = {
   scope: targetResourceGroup
   params: {
     location: location
-    suffix: suffix
-    uniqueSuffix: uniqueSuffix
     tags: tags
     appClientId: appClientId
     keyVaultUri: keyVault.outputs.keyVaultUri

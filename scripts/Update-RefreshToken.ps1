@@ -21,20 +21,20 @@
     It reuses the function-app modules so it exercises exactly the same runtime auth path.
 
 .PARAMETER KeyVaultName
-    Name of the Azure Key Vault holding the certificate, partner config, and refresh tokens.
+    Name of the Azure Key Vault holding the certificate, tenants config, and refresh tokens.
 
 .PARAMETER ClientId
     The Application (client) ID of the multi-tenant app registration.
 
 .PARAMETER TenantId
-    Optional. Renew only this partner tenant. If omitted, all AppPlusUser partners in
-    'partner-config' are processed.
+    Optional. Renew only this partner tenant. If omitted, all tenants in 'tenants-config'
+    with CollectPartnerInsights enabled are processed.
 
 .PARAMETER CertificateName
     Name of the certificate secret in Key Vault. Default: regapp-certificate-hso-mpc-integration
 
-.PARAMETER PartnerConfigSecretName
-    Name of the Key Vault secret holding partner-account JSON. Default: partner-config
+.PARAMETER TenantsConfigSecretName
+    Name of the Key Vault secret holding tenant JSON. Default: tenants-config
 
 .PARAMETER Resource
     Which API surface scope to renew against. Default: partner-insights
@@ -66,7 +66,7 @@ param (
 
     [string]$CertificateName = 'regapp-certificate-hso-mpc-integration',
 
-    [string]$PartnerConfigSecretName = 'partner-config',
+    [string]$TenantsConfigSecretName = 'tenants-config',
 
     [ValidateSet('partner-insights', 'graph-beta')]
     [string]$Resource = 'partner-insights'
@@ -87,17 +87,15 @@ Write-Host ''
 
 # Resolve the set of partners to renew.
 if ($TenantId) {
-    $targets = @([PSCustomObject]@{ TenantId = $TenantId; DisplayName = $TenantId; InsightsAuthMode = 'AppPlusUser' })
+    $targets = @([PSCustomObject]@{ TenantId = $TenantId; DisplayName = $TenantId; CollectPartnerInsights = $true })
 }
 else {
-    $configSecret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $PartnerConfigSecretName -AsPlainText
-    $targets = @($configSecret | ConvertFrom-Json | Where-Object {
-            ($_.InsightsAuthMode ?? 'AppPlusUser') -eq 'AppPlusUser'
-        })
+    $configSecret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $TenantsConfigSecretName -AsPlainText
+    $targets = @($configSecret | ConvertFrom-Json | Where-Object { $_.CollectPartnerInsights -ne $false })
 }
 
 if ($targets.Count -eq 0) {
-    Write-Host 'No AppPlusUser partners to renew.' -ForegroundColor Yellow
+    Write-Host 'No tenants with CollectPartnerInsights enabled to renew.' -ForegroundColor Yellow
     return
 }
 

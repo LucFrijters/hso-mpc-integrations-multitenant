@@ -6,7 +6,7 @@
 
 .NOTES
     Topology: data is collected PARTNER-GLOBAL from the HSO Production Partner Center (and any
-    additional partner accounts in partner-config). The Partner Insights datasets already carry
+    additional partner accounts in tenants-config). The Partner Insights datasets already carry
     per-customer rows, and the Partner Security Score exposes per-customer posture via
     customerInsights, so there is NO per-CSP-customer-tenant fan-out.
 #>
@@ -15,6 +15,24 @@
 # Loaded once at module import time and reused throughout the function app lifetime.
 
 $script:ConfigCache = $null
+
+function Get-EnvironmentValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultValue
+    )
+
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $DefaultValue
+    }
+
+    return $value
+}
 
 function Get-IntegrationConfig {
     <#
@@ -36,20 +54,20 @@ function Get-IntegrationConfig {
         KeyVaultUri                = $env:KEY_VAULT_URI
         KeyVaultName               = ($env:KEY_VAULT_URI -replace 'https://|\.vault\.azure\.net/?', '')
         StorageAccountName         = $env:STORAGE_ACCOUNT_NAME
-        StorageContainerName       = $env:STORAGE_CONTAINER_NAME ?? 'partner-data-raw'
+        StorageContainerName       = 'mpc-insights-data-raw'
         AppClientId                = $env:APP_CLIENT_ID
-        AppCertificateName         = $env:APP_CERTIFICATE_NAME ?? 'regapp-certificate-hso-mpc-integration'
+        AppCertificateName         = Get-EnvironmentValue -Name 'APP_CERTIFICATE_NAME' -DefaultValue 'regapp-certificate-hso-mpc-integration'
 
-        # Partner-account registry (replaces per-customer 'tenant-config').
-        # JSON array: [{ TenantId, DisplayName, MpnId, Enabled, InsightsAuthMode }]
-        PartnerConfigSecretName    = $env:PARTNER_CONFIG_SECRET_NAME ?? 'partner-config'
+        # Tenant registry for partner accounts (replaces per-customer tenant fan-out).
+        # JSON array: [{ TenantId, DisplayName, MpnId, Enabled, CollectPartnerInsights, CollectPartnerSecurityScore }]
+        TenantsConfigSecretName    = Get-EnvironmentValue -Name 'TENANTS_CONFIG_SECRET_NAME' -DefaultValue 'tenants-config'
 
         # ── Concurrency ─────────────────────────────────────────────────
         # Partner accounts are few (typically 1). Endpoint-level concurrency still
         # applies to the security-score + insights activities within an account.
-        MaxConcurrentPartners      = [int]($env:MAX_CONCURRENT_PARTNERS ?? '4')
-        MaxConcurrentEndpoints     = [int]($env:MAX_CONCURRENT_ENDPOINTS ?? '5')
-        CollectionTimeoutMinutes   = [int]($env:COLLECTION_TIMEOUT_MINUTES ?? '25')
+        MaxConcurrentPartners      = [int](Get-EnvironmentValue -Name 'MAX_CONCURRENT_PARTNERS' -DefaultValue '4')
+        MaxConcurrentEndpoints     = [int](Get-EnvironmentValue -Name 'MAX_CONCURRENT_ENDPOINTS' -DefaultValue '5')
+        CollectionTimeoutMinutes   = [int](Get-EnvironmentValue -Name 'COLLECTION_TIMEOUT_MINUTES' -DefaultValue '25')
 
         # ── Retry / Resilience ───────────────────────────────────────────
         MaxRetries                 = 3
@@ -67,20 +85,18 @@ function Get-IntegrationConfig {
         # The Insights API is asynchronous: ensure a scheduled report per dataset,
         # then download the latest completed execution and convert CSV/TSV -> JSON.
         Insights                   = @{
-            # Partner Center APIs (incl. the Insights surface) require the Secure Application
-            # Model with multifactor auth, so App+User is the default. AppOnly remains available
-            # only as an explicit override for non-MFA-gated scenarios / local testing.
-            AuthMode                = $env:INSIGHTS_AUTH_MODE ?? 'AppPlusUser'   # AppPlusUser | AppOnly
-            ReportNamePrefix        = $env:INSIGHTS_REPORT_PREFIX ?? 'hso-auto-'
-            # RecurrenceInterval minimum enforced by the API is 4h; default to daily.
-            RecurrenceIntervalHours = [int]($env:INSIGHTS_RECURRENCE_HOURS ?? '24')
-            RecurrenceCount         = [int]($env:INSIGHTS_RECURRENCE_COUNT ?? '600')
-            ReportFormat            = $env:INSIGHTS_REPORT_FORMAT ?? 'CSV'        # CSV | TSV
+            # Partner Center Insights requires Secure Application Model App+User auth with MFA.
+            AuthMode                = 'AppPlusUser'
+            ReportNamePrefix        = 'hso-auto-' # $env:INSIGHTS_REPORT_PREFIX ?? 'hso-auto-'
+            # RecurrenceInterval minimum enforced by the API is 4h. Count is 1 year of 4-hour runs.
+            RecurrenceIntervalHours = 4
+            RecurrenceCount         = 2190
+            ReportFormat            = Get-EnvironmentValue -Name 'INSIGHTS_REPORT_FORMAT' -DefaultValue 'CSV'        # CSV | TSV
             # When true, ensure a SELECT-all report for every dataset returned by
             # ScheduledDataset (covers "all datasets"); registry entries take precedence.
-            EnsureAllDatasets       = ($env:INSIGHTS_ENSURE_ALL_DATASETS -ne 'false')
+            EnsureAllDatasets       = $true
             # Max rows of CSV to parse into JSON in a single activity (memory guard).
-            MaxRowsPerReport        = [int]($env:INSIGHTS_MAX_ROWS_PER_REPORT ?? '500000')
+            MaxRowsPerReport        = [int](Get-EnvironmentValue -Name 'INSIGHTS_MAX_ROWS_PER_REPORT' -DefaultValue '1000000')
         }
 
         # ── API Surfaces ─────────────────────────────────────────────────

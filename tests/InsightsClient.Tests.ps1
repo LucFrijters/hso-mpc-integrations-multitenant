@@ -73,6 +73,7 @@ Describe 'Resolve-InsightsReportsToCollect' {
         ($res | Where-Object { $_.DatasetName -eq 'CustomersAndTenants' }).Source | Should -Be 'registry'
         $auto = $res | Where-Object { $_.DatasetName -eq 'AzureUsage' }
         $auto.Source | Should -Be 'auto'
+        $auto.Frequency | Should -Be 'Every4h'
         $auto.CustomQuery | Should -Match 'FROM AzureUsage'
     }
     It 'does not duplicate a dataset already covered by the registry' {

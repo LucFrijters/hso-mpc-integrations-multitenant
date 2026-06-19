@@ -92,12 +92,13 @@ function Write-CollectionToBlob {
         Write-Host "Blob stored: $containerName/$dataBlobPath ($($JsonPayload.Length) bytes)"
 
         return @{
-            BlobPath      = "$containerName/$dataBlobPath"
-            MetadataPath  = "$containerName/$metadataBlobPath"
-            BytesWritten  = $JsonPayload.Length
+            BlobPath     = "$containerName/$dataBlobPath"
+            MetadataPath = "$containerName/$metadataBlobPath"
+            BytesWritten = $JsonPayload.Length
         }
 
-    } finally {
+    }
+    finally {
         Remove-Item $dataFile.FullName -Force -ErrorAction SilentlyContinue
         Remove-Item $metadataFile.FullName -Force -ErrorAction SilentlyContinue
     }
@@ -139,38 +140,14 @@ function Write-StringToBlob {
                 -Properties $blobProperties `
                 -Force | Out-Null
         }
-    } finally {
+    }
+    finally {
         Remove-Item $tempFile.FullName -Force -ErrorAction SilentlyContinue
     }
-}
-
-
-function Test-BlobExists {
-    <#
-    .SYNOPSIS
-        Returns $true if a blob exists at the given path. Used for execution-level
-        idempotency (skip re-downloading an Insights execution already collected).
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$BlobPath,
-        [string]$ContainerName
-    )
-
-    $blobConfig = Get-IntegrationConfig
-    $storageAccountName = $blobConfig.StorageAccountName
-    if (-not $ContainerName) { $ContainerName = $blobConfig.StorageContainerName }
-
-    $storageContext = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
-
-    $existing = Get-AzStorageBlob -Container $ContainerName -Blob $BlobPath `
-        -Context $storageContext -ErrorAction SilentlyContinue
-    return [bool]$existing
 }
 
 
 Export-ModuleMember -Function @(
     'Write-CollectionToBlob'
     'Write-StringToBlob'
-    'Test-BlobExists'
 )

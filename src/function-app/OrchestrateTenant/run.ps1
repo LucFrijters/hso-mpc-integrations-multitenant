@@ -13,34 +13,39 @@ param($Context)
         CorrelationId          : string
         TenantId               : string   - partner tenant ID
         TenantName             : string
-        InsightsAuthMode       : string   - 'AppPlusUser' (default, Secure App Model) | 'AppOnly'
         SecurityScoreEndpoints : array
         InsightsCatalog        : array
         InsightsReports        : array
-        EnsureAllDatasets      : bool
+        CollectPartnerInsights      : bool
+        CollectPartnerSecurityScore : bool
         TriggeredAtUtc         : string
         MaxConcurrentEndpoints : int
-        InsightsDailyHourUtc   : int       - hour at which the daily Insights pass runs
 #>
 
 $orchInput = $Context.Input | ConvertFrom-Json
 $correlationId = $orchInput.CorrelationId
 $tenantId = $orchInput.TenantId
 $tenantName = $orchInput.TenantName
-$insightsAuthMode = $orchInput.InsightsAuthMode ?? 'AppPlusUser'
 $securityEndpoints = @($orchInput.SecurityScoreEndpoints)
 $insightsCatalog = @($orchInput.InsightsCatalog)
 $insightsReports = @($orchInput.InsightsReports)
-$ensureAllDatasets = [bool]$orchInput.EnsureAllDatasets
 $triggeredAtUtc = $orchInput.TriggeredAtUtc
 $maxConcurrentEndpoints = [int]($orchInput.MaxConcurrentEndpoints ?? 5)
-$insightsDailyHour = [int]($orchInput.InsightsDailyHourUtc ?? 2)
+$collectPartnerInsights = $true
+if ($orchInput.PSObject.Properties['CollectPartnerInsights']) {
+    $collectPartnerInsights = [bool]$orchInput.CollectPartnerInsights
+}
+$collectPartnerSecurityScore = $true
+if ($orchInput.PSObject.Properties['CollectPartnerSecurityScore']) {
+    $collectPartnerSecurityScore = [bool]$orchInput.CollectPartnerSecurityScore
+}
 
 $logPrefix = "[$correlationId][$tenantName]"
 Write-Host "$logPrefix OrchestrateTenant (partner-global) started for $tenantId"
 
 # Deterministic: derive the cycle hour from the passed trigger time (never use UtcNow here).
 $currentHourUtc = [int]([DateTimeOffset]::Parse($triggeredAtUtc).Hour)
+$isEvery4hCycle = ($currentHourUtc % 4) -eq 0
 
 $results = @()
 $circuitBreakerFailures = 0
@@ -48,18 +53,21 @@ $circuitBreakerThreshold = 5
 
 try {
     # ── Step 1: which security endpoints run this cycle? ─────────────────
-    $activeSecurity = @($securityEndpoints | Where-Object {
-            switch ($_.Frequency) {
-                'Hourly' { $true }
-                'Every6h' { ($currentHourUtc % 6) -eq 0 }
-                'Daily' { $currentHourUtc -eq $insightsDailyHour }
-                default { $true }
-            }
-        })
+    $activeSecurity = @()
+    if ($collectPartnerSecurityScore) {
+        $activeSecurity = @($securityEndpoints | Where-Object {
+                switch ($_.Frequency) {
+                    'Hourly' { $true }
+                    'Every4h' { $isEvery4hCycle }
+                    'Every6h' { ($currentHourUtc % 6) -eq 0 }
+                    default { $true }
+                }
+            })
+    }
 
-    $includeInsights = ($currentHourUtc -eq $insightsDailyHour)
+    $includeInsights = $collectPartnerInsights -and $isEvery4hCycle
 
-    Write-Host "$logPrefix Active security endpoints: $($activeSecurity.Count)/$($securityEndpoints.Count); includeInsights=$includeInsights"
+    Write-Host "$logPrefix Active security endpoints: $($activeSecurity.Count)/$($securityEndpoints.Count); includeInsights=$includeInsights; collectPartnerInsights=$collectPartnerInsights; collectPartnerSecurityScore=$collectPartnerSecurityScore"
 
     # ── Step 2: Partner Security Score (Graph, AppOnly) ──────────────────
     if ($activeSecurity.Count -gt 0) {
@@ -119,7 +127,7 @@ try {
             TenantId      = $tenantId
             TenantName    = $tenantName
             Resource      = 'insights'
-            AuthMode      = $insightsAuthMode
+            AuthMode      = 'AppPlusUser'
         } | ConvertTo-Json -Compress
 
         $insightsToken = Invoke-DurableActivity -FunctionName 'AcquireToken' -Input $insightsTokenInput
@@ -137,7 +145,7 @@ try {
                 InsightsAuthMode  = $insightsToken.AuthMode
                 InsightsCatalog   = $insightsCatalog
                 RegistryReports   = $insightsReports
-                EnsureAllDatasets = $ensureAllDatasets
+                EnsureAllDatasets = $true
                 TriggeredAtUtc    = $triggeredAtUtc
             } | ConvertTo-Json -Depth 10 -Compress
 

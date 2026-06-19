@@ -3,8 +3,8 @@
 // ============================================================================
 
 param location string
-param suffix string
-param uniqueSuffix string
+//param suffix string
+//param uniqueSuffix string
 param tags object
 
 @secure()
@@ -120,8 +120,8 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: 'mpc-insights-data-raw'
         }
         {
-          name: 'PARTNER_CONFIG_SECRET_NAME'
-          value: 'partner-config'
+          name: 'TENANTS_CONFIG_SECRET_NAME'
+          value: 'tenants-config'
         }
         {
           name: 'APP_CERTIFICATE_NAME'
@@ -132,40 +132,16 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: appClientId
         }
         {
-          name: 'TIMER_SCHEDULE'
-          value: '0 0 */2 * * *'
-        }
-        {
-          name: 'INSIGHTS_DAILY_HOUR_UTC'
-          value: '2'
-        }
-        {
-          name: 'INSIGHTS_AUTH_MODE'
-          value: 'AppPlusUser'
-        }
-        {
           name: 'INSIGHTS_REPORT_PREFIX'
           value: 'hso-auto-'
-        }
-        {
-          name: 'INSIGHTS_RECURRENCE_HOURS'
-          value: '24'
-        }
-        {
-          name: 'INSIGHTS_RECURRENCE_COUNT'
-          value: '600'
         }
         {
           name: 'INSIGHTS_REPORT_FORMAT'
           value: 'CSV'
         }
         {
-          name: 'INSIGHTS_ENSURE_ALL_DATASETS'
-          value: 'true'
-        }
-        {
           name: 'INSIGHTS_MAX_ROWS_PER_REPORT'
-          value: '500000'
+          value: '1000000'
         }
         {
           name: 'MAX_CONCURRENT_PARTNERS'

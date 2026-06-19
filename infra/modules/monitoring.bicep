@@ -23,9 +23,6 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
     features: {
       enableLogAccessUsingOnlyResourcePermissions: true
     }
-    workspaceCapping: {
-      dailyQuotaGb: 5 // Cost protection
-    }
   }
 }
 

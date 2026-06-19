@@ -42,7 +42,7 @@
     Certificate User on the vault. Requires Owner or User Access Administrator.
 
 .PARAMETER ValidateKeyVaultAccess
-    Checks that partner-config and regapp-certificate-hso-mpc-integration are visible through Key Vault
+    Checks that tenants-config and regapp-certificate-hso-mpc-integration are visible through Key Vault
     metadata calls. Secret values are not printed.
 
 .EXAMPLE
@@ -237,9 +237,9 @@ if (-not $settings.Values) {
 
 Set-LocalSettingValue -SettingsObject $settings -Name 'KEY_VAULT_URI' -Value $vault.VaultUri
 Set-LocalSettingValue -SettingsObject $settings -Name 'STORAGE_ACCOUNT_NAME' -Value $StorageAccountName
-Set-LocalSettingValue -SettingsObject $settings -Name 'PARTNER_CONFIG_SECRET_NAME' -Value 'partner-config'
+Set-LocalSettingValue -SettingsObject $settings -Name 'STORAGE_CONTAINER_NAME' -Value 'mpc-insights-data-raw'
+Set-LocalSettingValue -SettingsObject $settings -Name 'TENANTS_CONFIG_SECRET_NAME' -Value 'tenants-config'
 Set-LocalSettingValue -SettingsObject $settings -Name 'APP_CERTIFICATE_NAME' -Value 'regapp-certificate-hso-mpc-integration'
-Set-LocalSettingValue -SettingsObject $settings -Name 'INSIGHTS_AUTH_MODE' -Value 'AppPlusUser'
 if ($AppClientId) {
     Set-LocalSettingValue -SettingsObject $settings -Name 'APP_CLIENT_ID' -Value $AppClientId
 }
@@ -255,9 +255,9 @@ if ($PSCmdlet.ShouldProcess($LocalSettingsPath, 'Update local Function App setti
 if ($ValidateKeyVaultAccess) {
     Write-Host ''
     Write-Host 'Validating Key Vault metadata access...' -ForegroundColor Cyan
-    Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name 'partner-config' -ErrorAction Stop | Out-Null
+    Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name 'tenants-config' -ErrorAction Stop | Out-Null
     Get-AzKeyVaultCertificate -VaultName $KeyVaultName -Name 'regapp-certificate-hso-mpc-integration' -ErrorAction Stop | Out-Null
-    Write-Ok 'partner-config and regapp-certificate-hso-mpc-integration are reachable through Key Vault metadata calls.'
+    Write-Ok 'tenants-config and regapp-certificate-hso-mpc-integration are reachable through Key Vault metadata calls.'
 }
 
 Write-Host ''
