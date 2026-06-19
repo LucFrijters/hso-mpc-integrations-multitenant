@@ -177,7 +177,143 @@ function Write-StringToBlob {
 }
 
 
+function Get-CollectionExecutionMarkerBlobPath {
+    <#
+    .SYNOPSIS
+        Builds a stable marker path for a downloaded Partner Insights execution.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$TenantName,
+        [Parameter(Mandatory)]$Endpoint,
+        [Parameter(Mandatory)][string]$ExecutionId
+    )
+
+    $safeTenantName = Get-SafeBlobPathSegment -Value $TenantName
+    $dataType = Get-CollectionDataType -Endpoint $Endpoint
+    $endpointName = Get-SafeBlobPathSegment -Value $Endpoint.Name
+    $safeExecutionId = Get-SafeBlobPathSegment -Value $ExecutionId
+
+    return "_collection-state/${safeTenantName}_${TenantId}/${dataType}/${endpointName}/${safeExecutionId}.json"
+}
+
+
+function Test-CollectionExecutionSeen {
+    <#
+    .SYNOPSIS
+        Returns true when a prior run already downloaded and marked this executionId.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$TenantName,
+        [Parameter(Mandatory)]$Endpoint,
+        [Parameter(Mandatory)][string]$ExecutionId
+    )
+
+    $blobConfig = Get-IntegrationConfig
+    $storageContext = New-AzStorageContext -StorageAccountName $blobConfig.StorageAccountName -UseConnectedAccount
+    $markerPath = Get-CollectionExecutionMarkerBlobPath -TenantId $TenantId -TenantName $TenantName -Endpoint $Endpoint -ExecutionId $ExecutionId
+
+    $marker = Invoke-WithRetry -OperationName "BlobExists:$markerPath" -ScriptBlock {
+        Get-AzStorageBlob -Container $blobConfig.StorageContainerName -Blob $markerPath -Context $storageContext -ErrorAction SilentlyContinue
+    }
+    return ($null -ne $marker)
+}
+
+
+function Set-CollectionExecutionSeen {
+    <#
+    .SYNOPSIS
+        Writes a marker after a Partner Insights execution payload has been stored successfully.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$TenantName,
+        [Parameter(Mandatory)]$Endpoint,
+        [Parameter(Mandatory)][string]$ExecutionId,
+        [Parameter(Mandatory)][string]$DataBlobPath,
+        [Parameter(Mandatory)][DateTimeOffset]$TimestampUtc
+    )
+
+    $markerPath = Get-CollectionExecutionMarkerBlobPath -TenantId $TenantId -TenantName $TenantName -Endpoint $Endpoint -ExecutionId $ExecutionId
+    $markerContent = @{
+        tenantId     = $TenantId
+        tenantName   = $TenantName
+        endpointName = $Endpoint.Name
+        executionId  = $ExecutionId
+        dataBlobPath = $DataBlobPath
+        markedUtc    = [DateTimeOffset]::UtcNow.ToString('o')
+        triggeredUtc = $TimestampUtc.ToString('o')
+    } | ConvertTo-Json -Depth 5
+
+    Write-StringToBlob -Content $markerContent -BlobPath $markerPath | Out-Null
+    return $markerPath
+}
+
+
+function Get-CollectionStateBlobPath {
+    <#
+    .SYNOPSIS
+        Builds a stable current-state blob path for singleton control-plane artifacts.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$TenantName,
+        [Parameter(Mandatory)]$Endpoint
+    )
+
+    $safeTenantName = Get-SafeBlobPathSegment -Value $TenantName
+    $dataType = Get-CollectionDataType -Endpoint $Endpoint
+    $endpointName = Get-SafeBlobPathSegment -Value $Endpoint.Name
+
+    return "_collection-state/${safeTenantName}_${TenantId}/${dataType}/${endpointName}.json"
+}
+
+
+function Write-CollectionStateToBlob {
+    <#
+    .SYNOPSIS
+        Writes a singleton current-state JSON artifact and metadata sidecar to stable blob paths.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$TenantName,
+        [Parameter(Mandatory)]$Endpoint,
+        [Parameter(Mandatory)][string]$JsonPayload,
+        [Parameter(Mandatory)][hashtable]$Metadata
+    )
+
+    $blobConfig = Get-IntegrationConfig
+    $dataBlobPath = Get-CollectionStateBlobPath -TenantId $TenantId -TenantName $TenantName -Endpoint $Endpoint
+    $metadataBlobPath = $dataBlobPath -replace '\.json$', '_metadata.json'
+
+    $Metadata['blobPath'] = "$($blobConfig.StorageContainerName)/$dataBlobPath"
+    $Metadata['stateUpdatedUtc'] = [DateTimeOffset]::UtcNow.ToString('o')
+
+    Write-StringToBlob -Content $JsonPayload -BlobPath $dataBlobPath | Out-Null
+    Write-StringToBlob -Content ($Metadata | ConvertTo-Json -Depth 5) -BlobPath $metadataBlobPath | Out-Null
+
+    Write-Host "Blob state stored: $($blobConfig.StorageContainerName)/$dataBlobPath ($($JsonPayload.Length) bytes)"
+
+    return @{
+        BlobPath     = "$($blobConfig.StorageContainerName)/$dataBlobPath"
+        MetadataPath = "$($blobConfig.StorageContainerName)/$metadataBlobPath"
+        BytesWritten = $JsonPayload.Length
+    }
+}
+
+
 Export-ModuleMember -Function @(
     'Write-CollectionToBlob'
     'Write-StringToBlob'
+    'Get-CollectionExecutionMarkerBlobPath'
+    'Test-CollectionExecutionSeen'
+    'Set-CollectionExecutionSeen'
+    'Get-CollectionStateBlobPath'
+    'Write-CollectionStateToBlob'
 )

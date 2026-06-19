@@ -87,6 +87,26 @@ function Assert-PartnerCenterMfaCompliance {
     }
 }
 
+
+function Assert-InsightsResponseSuccess {
+    <# .SYNOPSIS Fails when Partner Center returns an error envelope with HTTP 200. #>
+    [CmdletBinding()]
+    param(
+        $Body,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Method
+    )
+
+    if (-not $Body -or -not ($Body.PSObject.Properties.Name -contains 'statusCode')) { return }
+
+    $statusCode = 0
+    if (-not [int]::TryParse([string]$Body.statusCode, [ref]$statusCode)) { return }
+    if ($statusCode -lt 400) { return }
+
+    $message = if ($Body.PSObject.Properties.Name -contains 'message' -and $Body.message) { [string]$Body.message } else { 'Partner Insights API returned an error response envelope.' }
+    throw "Partner Insights API returned statusCode=$statusCode for $Method ${Path}: $message"
+}
+
 function Invoke-InsightsRequest {
     <#
     .SYNOPSIS
@@ -128,7 +148,9 @@ function Invoke-InsightsRequest {
     if ($RequireMfaCompliance) {
         Assert-PartnerCenterMfaCompliance -Response $response -Uri $url
     }
-    return ($response.Content | ConvertFrom-Json)
+    $bodyObject = $response.Content | ConvertFrom-Json
+    Assert-InsightsResponseSuccess -Body $bodyObject -Path $url -Method $Method
+    return $bodyObject
 }
 
 
@@ -251,44 +273,222 @@ function Get-InsightsDatasetName {
 }
 
 
+function Get-InsightsDatasetPropertyValue {
+    <# .SYNOPSIS Reads a dataset property across possible field spellings. #>
+    [CmdletBinding()]
+    param(
+        $Dataset,
+        [Parameter(Mandatory)][string[]]$PropertyNames
+    )
+
+    if (-not $Dataset) { return $null }
+    foreach ($propertyName in $PropertyNames) {
+        if ($Dataset.PSObject.Properties.Name -contains $propertyName) {
+            return $Dataset.$propertyName
+        }
+    }
+    return $null
+}
+
+
 function Get-InsightsDatasetColumns {
     <# .SYNOPSIS Defensively extracts selectable column names from a dataset definition. #>
     [CmdletBinding()]
     param($Dataset)
     if (-not $Dataset) { return @() }
 
-    $colContainer = $null
-    foreach ($p in @('selectableColumns', 'SelectableColumns', 'columns', 'Columns', 'availableColumns')) {
-        if ($Dataset.PSObject.Properties.Name -contains $p -and $Dataset.$p) { $colContainer = $Dataset.$p; break }
-    }
+    $colContainer = Get-InsightsDatasetPropertyValue -Dataset $Dataset `
+        -PropertyNames @('selectableColumns', 'SelectableColumns', 'columns', 'Columns', 'availableColumns')
     if (-not $colContainer) { return @() }
 
     $names = @()
-    foreach ($c in $colContainer) {
-        if ($c -is [string]) { $names += $c }
-        elseif ($c.PSObject.Properties.Name -contains 'name') { $names += [string]$c.name }
-        elseif ($c.PSObject.Properties.Name -contains 'columnName') { $names += [string]$c.columnName }
-        elseif ($c.PSObject.Properties.Name -contains 'Name') { $names += [string]$c.Name }
+    foreach ($column in @($colContainer)) {
+        if ($column -is [string]) { $names += $column }
+        elseif ($column.PSObject.Properties.Name -contains 'name') { $names += [string]$column.name }
+        elseif ($column.PSObject.Properties.Name -contains 'columnName') { $names += [string]$column.columnName }
+        elseif ($column.PSObject.Properties.Name -contains 'Name') { $names += [string]$column.Name }
     }
-    return @($names | Where-Object { $_ })
+    return @($names | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+}
+
+
+function Get-InsightsDatasetAvailableDateRanges {
+    <# .SYNOPSIS Extracts available TIMESPAN values for a dataset. #>
+    [CmdletBinding()]
+    param($Dataset)
+
+    $rangeContainer = Get-InsightsDatasetPropertyValue -Dataset $Dataset `
+        -PropertyNames @('availableDateRanges', 'AvailableDateRanges', 'dateRanges', 'DateRanges', 'availableTimeRanges', 'AvailableTimeRanges')
+    if (-not $rangeContainer) { return @() }
+
+    $ranges = @()
+    foreach ($rangeItem in @($rangeContainer)) {
+        if ($rangeItem -is [string]) {
+            $ranges += $rangeItem
+            continue
+        }
+
+        foreach ($propertyName in @('name', 'Name', 'value', 'Value', 'dateRange', 'DateRange', 'range', 'Range')) {
+            if ($rangeItem.PSObject.Properties.Name -contains $propertyName -and $rangeItem.$propertyName) {
+                $ranges += [string]$rangeItem.$propertyName
+                break
+            }
+        }
+    }
+
+    return @($ranges | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+}
+
+
+function Select-InsightsDatasetTimespan {
+    <# .SYNOPSIS Chooses a valid query TIMESPAN from a dataset's availableDateRanges. #>
+    [CmdletBinding()]
+    param($Dataset)
+
+    $availableRanges = @(Get-InsightsDatasetAvailableDateRanges -Dataset $Dataset)
+    if ($availableRanges.Count -eq 0) { return $null }
+
+    foreach ($preferredRange in @('LAST_6_MONTHS', 'LAST_12_MONTHS', 'LAST_3_MONTHS', 'LAST_MONTH', 'LAST_1_MONTH', 'LAST_30_DAYS', 'LAST_7_DAYS')) {
+        $matchedRange = @($availableRanges | Where-Object { [string]::Equals($_, $preferredRange, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($matchedRange.Count -gt 0) { return [string]$matchedRange[0] }
+    }
+
+    if (@($availableRanges | Where-Object { $_ -ne 'LIFETIME' }).Count -eq 0) { return $null }
+
+    return [string]$availableRanges[0]
+}
+
+
+function Get-InsightsQueryId {
+    <# .SYNOPSIS Defensively extracts queryId across field spellings. #>
+    [CmdletBinding()]
+    param($Query)
+
+    if (-not $Query) { return $null }
+    foreach ($propertyName in @('queryId', 'QueryId', 'id', 'Id')) {
+        if ($Query.PSObject.Properties.Name -contains $propertyName -and $Query.$propertyName) {
+            return [string]$Query.$propertyName
+        }
+    }
+    return $null
+}
+
+
+function Get-InsightsQueryText {
+    <# .SYNOPSIS Defensively extracts the query text across field spellings. #>
+    [CmdletBinding()]
+    param($Query)
+
+    if (-not $Query) { return $null }
+    foreach ($propertyName in @('query', 'Query', 'queryText', 'QueryText')) {
+        if ($Query.PSObject.Properties.Name -contains $propertyName -and $Query.$propertyName) {
+            return [string]$Query.$propertyName
+        }
+    }
+    return $null
+}
+
+
+function Get-InsightsQueryProjectionColumns {
+    <# .SYNOPSIS Extracts the SELECT projection columns from a Partner Insights query. #>
+    [CmdletBinding()]
+    param([string]$Query)
+
+    if ([string]::IsNullOrWhiteSpace($Query)) { return @() }
+    $match = [regex]::Match($Query, '(?is)^\s*SELECT\s+(.*?)\s+FROM\s+')
+    if (-not $match.Success) { return @() }
+
+    return @($match.Groups[1].Value -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+
+function Get-InsightsQueryMissingColumns {
+    <# .SYNOPSIS Returns projected query columns absent from the current dataset selectableColumns. #>
+    [CmdletBinding()]
+    param(
+        [string]$Query,
+        [string[]]$DatasetColumns
+    )
+
+    $projectedColumns = @(Get-InsightsQueryProjectionColumns -Query $Query)
+    if ($projectedColumns.Count -eq 0) { return @('__unparseable_query__') }
+
+    $available = @{}
+    foreach ($column in @($DatasetColumns)) {
+        if (-not [string]::IsNullOrWhiteSpace($column)) { $available[$column] = $true }
+    }
+
+    return @($projectedColumns | Where-Object { -not $available.ContainsKey($_) })
+}
+
+
+function Test-InsightsSystemQueryCompatible {
+    <# .SYNOPSIS Checks whether a system query projection matches live selectableColumns. #>
+    [CmdletBinding()]
+    param(
+        [string]$Query,
+        [string[]]$DatasetColumns
+    )
+
+    return (@(Get-InsightsQueryMissingColumns -Query $Query -DatasetColumns $DatasetColumns).Count -eq 0)
+}
+
+
+function Get-InsightsDatasetMinimumRecurrenceInterval {
+    <# .SYNOPSIS Reads minimumRecurrenceInterval in hours when supplied by /ScheduledDataset. #>
+    [CmdletBinding()]
+    param($Dataset)
+
+    $rawValue = Get-InsightsDatasetPropertyValue -Dataset $Dataset `
+        -PropertyNames @('minimumRecurrenceInterval', 'MinimumRecurrenceInterval', 'minRecurrenceInterval', 'MinRecurrenceInterval')
+    if ($null -eq $rawValue) { return $null }
+
+    $firstValue = @($rawValue | Where-Object { $null -ne $_ } | Select-Object -First 1)
+    if ($firstValue.Count -eq 0) { return $null }
+
+    $parsedValue = 0
+    if ([int]::TryParse([string]$firstValue[0], [ref]$parsedValue)) {
+        return $parsedValue
+    }
+    return $null
+}
+
+
+function Get-ClampedInsightsRecurrenceInterval {
+    <# .SYNOPSIS Applies Partner Insights RecurrenceInterval bounds: clamp(max(4, datasetMin), 4, 2160). #>
+    [CmdletBinding()]
+    param([AllowNull()]$MinimumRecurrenceIntervalHours)
+
+    $datasetMinimum = 0
+    if ($null -ne $MinimumRecurrenceIntervalHours) {
+        [int]::TryParse([string]$MinimumRecurrenceIntervalHours, [ref]$datasetMinimum) | Out-Null
+    }
+
+    $interval = [Math]::Max(4, $datasetMinimum)
+    return [Math]::Min(2160, [Math]::Max(4, $interval))
 }
 
 
 function New-DatasetSelectQuery {
     <#
     .SYNOPSIS
-        Builds a report query that selects all known columns from a dataset.
-        Falls back to SELECT * when columns are unknown.
+        Builds a report query that selects explicit selectableColumns from a dataset.
+        Partner Center's report query grammar does not support SELECT *.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$DatasetName,
         [string[]]$Columns,
-        [string]$Timespan = 'LAST_6_MONTHS'
+        [AllowNull()][string]$Timespan
     )
-    $cols = if ($Columns -and $Columns.Count -gt 0) { ($Columns -join ',') } else { '*' }
-    $query = "SELECT $cols FROM $DatasetName"
-    if ($Timespan) { $query += " TIMESPAN $Timespan" }
+
+    $selectedColumns = @($Columns | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($selectedColumns.Count -eq 0) {
+        throw "Dataset '$DatasetName' has no selectableColumns; skipping generated Partner Insights query."
+    }
+
+    $query = "SELECT $($selectedColumns -join ',') FROM $DatasetName"
+    if (-not [string]::IsNullOrWhiteSpace($Timespan)) { $query += " TIMESPAN $Timespan" }
     return $query
 }
 
@@ -302,6 +502,69 @@ function Get-InsightsReportName {
     )
     $prefix = $Config.Insights.ReportNamePrefix
     return "$prefix$DatasetName"
+}
+
+
+function Get-InsightsQueryName {
+    <# .SYNOPSIS Builds a Partner Center-safe generated query name: alphanumerics and whitespace only. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DatasetName,
+        [Parameter(Mandatory)]$Config
+    )
+
+    $prefix = [string]$Config.Insights.ReportNamePrefix
+    $rawName = "$prefix $DatasetName query $([DateTimeOffset]::UtcNow.ToString('yyyyMMddHHmmss'))"
+    $safeName = ($rawName -replace '[^a-zA-Z0-9\s]', ' ') -replace '\s+', ' '
+    $safeName = $safeName.Trim()
+    if ([string]::IsNullOrWhiteSpace($safeName)) { return "Insights query $([DateTimeOffset]::UtcNow.ToString('yyyyMMddHHmmss'))" }
+    return $safeName
+}
+
+function Get-InsightsReportStatus {
+    <# .SYNOPSIS Reads reportStatus defensively from a scheduled report record. #>
+    [CmdletBinding()]
+    param($Report)
+
+    if (-not $Report) { return $null }
+    foreach ($propertyName in @('reportStatus', 'ReportStatus', 'status', 'Status')) {
+        if ($Report.PSObject.Properties.Name -contains $propertyName -and $Report.$propertyName) {
+            return [string]$Report.$propertyName
+        }
+    }
+    return $null
+}
+
+
+function Test-InsightsReportNameMatches {
+    <# .SYNOPSIS Matches the deterministic base report name and recreated suffixed names. #>
+    [CmdletBinding()]
+    param(
+        $Report,
+        [Parameter(Mandatory)][string]$ReportName
+    )
+
+    if (-not $Report -or -not $Report.reportName) { return $false }
+    return ($Report.reportName -eq $ReportName -or $Report.reportName -like "$ReportName-*")
+}
+
+
+function Test-InsightsReportIsReusable {
+    <# .SYNOPSIS Only Active scheduled reports are safe to reuse. #>
+    [CmdletBinding()]
+    param($Report)
+
+    $status = Get-InsightsReportStatus -Report $Report
+    return ($status -and $status -ieq 'Active')
+}
+
+
+function New-InsightsRecreatedReportName {
+    <# .SYNOPSIS Builds a unique report name while preserving the deterministic base prefix. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ReportName)
+
+    return "$ReportName-$([DateTimeOffset]::UtcNow.ToString('yyyyMMddHHmmss'))"
 }
 
 
@@ -347,28 +610,75 @@ function Resolve-InsightsReportsToCollect {
     .SYNOPSIS
         Computes the full set of Insights reports to ensure + download:
         registry-defined reports first, then (optionally) one generated report per remaining dataset.
+        Generated reports are skipped when a dataset has no selectableColumns.
     .OUTPUTS
-        Array of definition hashtables: DatasetName, SystemQueryId, CustomQuery, Frequency, Source.
+        Array of definition hashtables: DatasetName, SystemQueryId, CustomQuery, Frequency, Source,
+        RecurrenceIntervalHours, MinimumRecurrenceIntervalHours, Timespan, ColumnCount.
     #>
     [CmdletBinding()]
     param(
         $RegistryReports,
         $Datasets,
+        $Queries,
         [bool]$EnsureAllDatasets = $true
     )
 
     $result = @()
     $covered = @{}
+    $datasetByName = @{}
+    $queryById = @{}
 
-    foreach ($r in @($RegistryReports)) {
-        if (-not $r.DatasetName) { continue }
-        $covered[$r.DatasetName.ToLower()] = $true
+    foreach ($datasetRecord in @($Datasets)) {
+        $datasetName = Get-InsightsDatasetName -Dataset $datasetRecord
+        if (-not $datasetName) { continue }
+        $datasetByName[$datasetName.ToLowerInvariant()] = $datasetRecord
+    }
+
+    foreach ($queryRecord in @($Queries)) {
+        $queryId = Get-InsightsQueryId -Query $queryRecord
+        if (-not $queryId) { continue }
+        $queryById[$queryId] = $queryRecord
+    }
+
+    foreach ($registryReport in @($RegistryReports)) {
+        if (-not $registryReport.DatasetName) { continue }
+        $datasetKey = $registryReport.DatasetName.ToLowerInvariant()
+        if (-not $datasetByName.ContainsKey($datasetKey)) { continue }
+        $covered[$datasetKey] = $true
+
+        $datasetRecord = if ($datasetByName.ContainsKey($datasetKey)) { $datasetByName[$datasetKey] } else { $null }
+        $minimumRecurrenceInterval = Get-InsightsDatasetMinimumRecurrenceInterval -Dataset $datasetRecord
+        $recurrenceInterval = Get-ClampedInsightsRecurrenceInterval -MinimumRecurrenceIntervalHours $minimumRecurrenceInterval
+        $timespan = Select-InsightsDatasetTimespan -Dataset $datasetRecord
+        $columns = @(Get-InsightsDatasetColumns -Dataset $datasetRecord)
+        if ($columns.Count -eq 0) { continue }
+
+        $systemQueryId = $null
+        $customQuery = $null
+        $source = 'registry'
+        $missingColumns = @()
+        $queryRecord = if ($registryReport.SystemQueryId -and $queryById.ContainsKey($registryReport.SystemQueryId)) { $queryById[$registryReport.SystemQueryId] } else { $null }
+        $queryText = Get-InsightsQueryText -Query $queryRecord
+        if ($queryText -and (Test-InsightsSystemQueryCompatible -Query $queryText -DatasetColumns $columns)) {
+            $systemQueryId = $registryReport.SystemQueryId
+        }
+        else {
+            $customQuery = New-DatasetSelectQuery -DatasetName $registryReport.DatasetName -Columns $columns -Timespan $timespan
+            $source = if ($queryRecord) { 'registry-schema-fallback' } else { 'registry-catalog-fallback' }
+            if ($queryText) { $missingColumns = @(Get-InsightsQueryMissingColumns -Query $queryText -DatasetColumns $columns) }
+        }
+
         $result += @{
-            DatasetName   = $r.DatasetName
-            SystemQueryId = $r.SystemQueryId
-            CustomQuery   = $null
-            Frequency     = ($r.Frequency ?? 'Every4h')
-            Source        = 'registry'
+            DatasetName                     = $registryReport.DatasetName
+            SystemQueryId                   = $systemQueryId
+            CustomQuery                     = $customQuery
+            Frequency                       = "Every${recurrenceInterval}h"
+            Source                          = $source
+            RecurrenceIntervalHours         = $recurrenceInterval
+            MinimumRecurrenceIntervalHours  = $minimumRecurrenceInterval
+            Timespan                        = $timespan
+            ColumnCount                     = $columns.Count
+            MissingSystemQueryColumns       = $missingColumns
         }
     }
 
@@ -377,15 +687,24 @@ function Resolve-InsightsReportsToCollect {
             $name = Get-InsightsDatasetName -Dataset $ds
             if (-not $name) { continue }
             if ($covered[$name.ToLower()]) { continue }
-            $covered[$name.ToLower()] = $true
+            $covered[$name.ToLowerInvariant()] = $true
 
             $cols = Get-InsightsDatasetColumns -Dataset $ds
+            if (@($cols).Count -eq 0) { continue }
+            $timespan = Select-InsightsDatasetTimespan -Dataset $ds
+            $minimumRecurrenceInterval = Get-InsightsDatasetMinimumRecurrenceInterval -Dataset $ds
+            $recurrenceInterval = Get-ClampedInsightsRecurrenceInterval -MinimumRecurrenceIntervalHours $minimumRecurrenceInterval
+
             $result += @{
-                DatasetName   = $name
-                SystemQueryId = $null
-                CustomQuery   = (New-DatasetSelectQuery -DatasetName $name -Columns $cols)
-                Frequency     = 'Every4h'
-                Source        = 'auto'
+                DatasetName                     = $name
+                SystemQueryId                   = $null
+                CustomQuery                     = (New-DatasetSelectQuery -DatasetName $name -Columns $cols -Timespan $timespan)
+                Frequency                       = "Every${recurrenceInterval}h"
+                Source                          = 'auto'
+                RecurrenceIntervalHours         = $recurrenceInterval
+                MinimumRecurrenceIntervalHours  = $minimumRecurrenceInterval
+                Timespan                        = $timespan
+                ColumnCount                     = @($cols).Count
             }
         }
     }
@@ -407,7 +726,8 @@ function New-InsightsQuery {
         [Parameter(Mandatory)][string]$AccessToken,
         [string]$Description = 'Auto-created by HSO Insights integration',
         [string]$CorrelationId = [guid]::NewGuid().ToString(),
-        [switch]$RequireMfaCompliance
+        [switch]$RequireMfaCompliance,
+        [switch]$PassThruResponse
     )
 
     $payload = @{ Name = $Name; Description = $Description; Query = $Query }
@@ -417,6 +737,7 @@ function New-InsightsQuery {
 
     $queryId = $body.value | Select-Object -First 1 -ExpandProperty queryId -ErrorAction SilentlyContinue
     if (-not $queryId) { throw "Create query '$Name' did not return a queryId (statusCode=$($body.statusCode), message=$($body.message))" }
+    if ($PassThruResponse) { return @{ QueryId = $queryId; Response = $body } }
     return $queryId
 }
 
@@ -429,13 +750,15 @@ function New-InsightsReport {
         [Parameter(Mandatory)][string]$QueryId,
         [Parameter(Mandatory)][string]$AccessToken,
         [Parameter(Mandatory)]$Config,
+        [int]$RecurrenceIntervalHours = 0,
         [string]$CorrelationId = [guid]::NewGuid().ToString(),
-        [switch]$RequireMfaCompliance
+        [switch]$RequireMfaCompliance,
+        [switch]$PassThruResponse
     )
 
-    # API minimum RecurrenceInterval is 4 hours.
-    $interval = [Math]::Max(4, [int]$Config.Insights.RecurrenceIntervalHours)
-    $startTime = [DateTimeOffset]::UtcNow.AddMinutes(5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $requestedInterval = if ($RecurrenceIntervalHours -gt 0) { $RecurrenceIntervalHours } else { [int]$Config.Insights.RecurrenceIntervalHours }
+    $interval = Get-ClampedInsightsRecurrenceInterval -MinimumRecurrenceIntervalHours $requestedInterval
+    $startTime = [DateTimeOffset]::UtcNow.AddHours(4).AddMinutes(5).ToString('yyyy-MM-ddTHH:mm:ssZ')
 
     $payload = @{
         ReportName         = $ReportName
@@ -443,9 +766,13 @@ function New-InsightsReport {
         QueryId            = $QueryId
         StartTime          = $startTime
         ExecuteNow         = $false
+        QueryStartTime     = $null
+        QueryEndTime       = $null
         RecurrenceInterval = $interval
         RecurrenceCount    = [int]$Config.Insights.RecurrenceCount
         Format             = $Config.Insights.ReportFormat
+        CallbackUrl        = $null
+        CallbackMethod     = $null
     }
 
     $body = Invoke-InsightsRequest -Path '/ScheduledReport' -Method POST -Body $payload `
@@ -454,6 +781,7 @@ function New-InsightsReport {
 
     $reportId = $body.value | Select-Object -First 1 -ExpandProperty reportId -ErrorAction SilentlyContinue
     if (-not $reportId) { throw "Create report '$ReportName' did not return a reportId (statusCode=$($body.statusCode), message=$($body.message))" }
+    if ($PassThruResponse) { return @{ ReportId = $reportId; Response = $body } }
     return $reportId
 }
 
@@ -473,34 +801,63 @@ function Register-InsightsReport {
         [AllowNull()][AllowEmptyCollection()]$ExistingReports = @(),
         [Parameter(Mandatory)][string]$AccessToken,
         [Parameter(Mandatory)]$Config,
-        [string]$CorrelationId = [guid]::NewGuid().ToString(),
-        [switch]$RequireMfaCompliance
+        [string]$CorrelationId = [guid]::NewGuid().ToString()
     )
 
     if ($null -eq $ExistingReports) { $ExistingReports = @() }
 
     $reportName = Get-InsightsReportName -DatasetName $Definition.DatasetName -Config $Config
 
-    $existing = @($ExistingReports) | Where-Object { $_.reportName -eq $reportName } | Select-Object -First 1
+    $matchingReports = @($ExistingReports) | Where-Object { Test-InsightsReportNameMatches -Report $_ -ReportName $reportName }
+    $existing = @($matchingReports | Where-Object { Test-InsightsReportIsReusable -Report $_ }) | Select-Object -First 1
     if ($existing) {
-        return @{ ReportId = $existing.reportId; ReportName = $reportName; Created = $false }
+        return @{
+            ReportId       = $existing.reportId
+            ReportName     = $existing.reportName
+            QueryId        = $existing.queryId
+            Created        = $false
+            Recreated      = $false
+            QueryCreated   = $false
+            QueryName      = $null
+            QueryResponse  = $null
+            ReportResponse = $null
+            ExistingStatus = (Get-InsightsReportStatus -Report $existing)
+        }
     }
 
     $queryId = $Definition.SystemQueryId
+    $queryCreated = $false
+    $queryName = $null
+    $queryResponse = $null
     if (-not $queryId) {
         if (-not $Definition.CustomQuery) {
             throw "No system query or custom query available for dataset '$($Definition.DatasetName)'"
         }
-        $queryId = New-InsightsQuery -Name "$reportName-query" -Query $Definition.CustomQuery `
-            -AccessToken $AccessToken -CorrelationId $CorrelationId `
-            -RequireMfaCompliance:$RequireMfaCompliance
+        $queryName = Get-InsightsQueryName -DatasetName $Definition.DatasetName -Config $Config
+        $queryResult = New-InsightsQuery -Name $queryName -Query $Definition.CustomQuery `
+            -AccessToken $AccessToken -CorrelationId $CorrelationId -PassThruResponse
+        $queryId = $queryResult.QueryId
+        $queryCreated = $true
+        $queryResponse = $queryResult.Response
     }
 
-    $reportId = New-InsightsReport -ReportName $reportName -QueryId $queryId `
-        -AccessToken $AccessToken -Config $Config -CorrelationId $CorrelationId `
-        -RequireMfaCompliance:$RequireMfaCompliance
+    $createReportName = if (@($matchingReports).Count -gt 0) { New-InsightsRecreatedReportName -ReportName $reportName } else { $reportName }
+    $reportResult = New-InsightsReport -ReportName $createReportName -QueryId $queryId `
+        -AccessToken $AccessToken -Config $Config -RecurrenceIntervalHours $Definition.RecurrenceIntervalHours `
+        -CorrelationId $CorrelationId -PassThruResponse
 
-    return @{ ReportId = $reportId; ReportName = $reportName; Created = $true }
+    return @{
+        ReportId       = $reportResult.ReportId
+        ReportName     = $createReportName
+        QueryId        = $queryId
+        Created        = $true
+        Recreated      = (@($matchingReports).Count -gt 0)
+        QueryCreated   = $queryCreated
+        QueryName      = $queryName
+        QueryResponse  = $queryResponse
+        ReportResponse = $reportResult.Response
+        ExistingStatus = if (@($matchingReports).Count -gt 0) { Get-InsightsReportStatus -Report (@($matchingReports)[0]) } else { $null }
+    }
 }
 
 
@@ -527,7 +884,15 @@ function Get-InsightsLatestExecution {
         -CorrelationId $CorrelationId -RequireMfaCompliance:$RequireMfaCompliance
     if ($null -eq $body) { return $null }
 
-    return ($body.value | Select-Object -First 1)
+    $execution = $body.value | Select-Object -First 1
+    if ($execution) {
+        foreach ($propertyName in @('statusCode', 'message', 'dataRedacted')) {
+            if ($body.PSObject.Properties.Name -contains $propertyName -and -not ($execution.PSObject.Properties.Name -contains $propertyName)) {
+                $execution | Add-Member -NotePropertyName $propertyName -NotePropertyValue $body.$propertyName -Force
+            }
+        }
+    }
+    return $execution
 }
 
 
@@ -593,10 +958,24 @@ Export-ModuleMember -Function @(
     'Get-InsightsDatasets'
     'Get-InsightsQueries'
     'Get-InsightsReportList'
+    'Assert-InsightsResponseSuccess'
     'Get-InsightsDatasetName'
     'Get-InsightsDatasetColumns'
+    'Get-InsightsDatasetAvailableDateRanges'
+    'Select-InsightsDatasetTimespan'
+    'Get-InsightsQueryId'
+    'Get-InsightsQueryText'
+    'Get-InsightsQueryProjectionColumns'
+    'Get-InsightsQueryMissingColumns'
+    'Test-InsightsSystemQueryCompatible'
+    'Get-InsightsDatasetMinimumRecurrenceInterval'
+    'Get-ClampedInsightsRecurrenceInterval'
     'New-DatasetSelectQuery'
     'Get-InsightsReportName'
+    'Get-InsightsQueryName'
+    'Get-InsightsReportStatus'
+    'Test-InsightsReportIsReusable'
+    'Test-InsightsReportNameMatches'
     'Convert-DelimitedToJson'
     'Resolve-InsightsReportsToCollect'
     'New-InsightsQuery'

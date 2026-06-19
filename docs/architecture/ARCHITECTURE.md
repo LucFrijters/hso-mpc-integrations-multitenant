@@ -6,7 +6,7 @@
 |-----------------|-------------------------------------------------|
 | Author          | Luc Frijters                                    |
 | Status          | Draft                                           |
-| Version         | 2.4                                             |
+| Version         | 2.5                                             |
 | Last Updated    | 2026-06-19                                      |
 | Classification  | Internal — Confidential                         |
 
@@ -17,7 +17,7 @@
 > - **Insights programmatic API** (`/insights/v1/mpn/…`): enumerate all datasets and queries, then ensure scheduled reports and download the latest completed execution per dataset. Report files arrive as **CSV/TSV and are converted to JSON** before storage.
 > - **Partner-global topology.** The Insights API and the Partner Security Score are both partner-level. They are collected **once from the HSO Production Partner Center**, not iterated per CSP customer tenant. Per-customer detail comes from inside the data (`CustomersAndTenants` rows; security-score `customerInsights`). The previous per-customer fan-out is removed — this is the principal efficiency gain.
 > - **Security Score corrected**: added `customerInsights`; removed `securityAlerts` (not a documented method of the partner security namespace).
-> - **Cadence**: Insights report `RecurrenceInterval` minimum is 4h, so Insights collection runs on a fixed **every 4 hours UTC** cadence.
+> - **Cadence**: Insights report freshness is dataset-driven. Each scheduled report uses the dataset's `minimumRecurrenceInterval`, clamped to Partner Center's 4..2160 hour bounds.
 > - **Full-cycle collection**: scheduled reports are created once and reused, but the latest completed execution is downloaded and stored on every collection cycle.
 
 > **Revision 2.1 — runtime to PowerShell 7.6 (2026-06-18).** The worker targets **PowerShell 7.6**, which on Azure Functions is currently **preview, Windows-only, and requires .NET 10**. PowerShell 7.4 is GA until **2026-11-10**, and 7.5 isn't offered on Functions, so 7.6 is the only forward version. Implications: the app must run on a **Windows** plan (the EP1 plan here is Windows, `reserved: false`); **Linux Consumption and Flex Consumption are not available on 7.6**. The runtime version is a Bicep parameter (`powerShellVersion`, default `7.6`, allowed `7.6`/`7.4`) so any environment can pin to `7.4` until 7.6 reaches GA. CI PowerShell jobs run on `windows-latest` to match the runtime.
@@ -27,6 +27,8 @@
 > **Revision 2.3 — no VNet dependency / local Key Vault development (2026-06-19).** Function App VNet integration and private endpoints were removed. Key Vault and storage now use public Azure service endpoints with Microsoft Entra ID / RBAC authorization, which allows the local Functions host to use the main deployed Key Vault without VPN/private DNS. `scripts/Initialize-LocalDevelopment.ps1` configures local settings, can enable public Key Vault access, and can grant the signed-in developer the required Key Vault data-plane roles.
 
 > **Revision 2.4 — production readiness hardening (2026-06-19).** CI/CD packaging now stages the Function App and excludes `local.settings.json` and editor-only folders before producing `function-app.zip`; resource-group naming is consistent across scripts and workflows; alert notification email is a Bicep parameter (`alertEmailAddress` / `ALERT_EMAIL_ADDRESS`); Application Insights local auth remains disabled and the Function App sets `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD`; `.gitattributes` pins source/config files to LF line endings.
+
+> **Revision 2.5 — Partner Insights conformance hardening (2026-06-19).** The Insights flow now enforces dataset-driven scheduled-report recurrence, generates only explicit-column custom queries, skips registry system-query entries absent from the partner's dataset catalog, falls back to generated queries when a documented system query no longer matches live `selectableColumns`, reuses only `Active` scheduled reports, treats in-body `statusCode >= 400` envelopes as failures, records redaction/expiry/minimum-recurrence metadata, and skips re-downloading unchanged `executionId` payloads. Polling remains intentional instead of `CallbackUrl` because it avoids a public inbound surface and keeps Durable replay deterministic; execution batching remains an optional future optimization.
 
 ---
 
@@ -71,7 +73,7 @@ The solution is designed for **enterprise-grade reliability**, aligned with the 
 | Goal                        | Metric                                                       |
 |-----------------------------|--------------------------------------------------------------|
 | Complete data collection    | 100% of Partner Insights datasets/reports + Security Score endpoints covered |
-| Freshness                   | Security Score no older than ~6 hours; Insights refreshed every 4 hours UTC |
+| Freshness                   | Security Score no older than ~6 hours; Insights report generation follows each dataset's `minimumRecurrenceInterval` |
 | Reliability                 | 99.9% successful collection cycles per month                 |
 | Security                    | No client secrets; certificate auth, Managed Identity, and Key Vault-stored SAM refresh tokens only |
 | Auditability                | Full lineage from API call to blob, with correlation IDs     |
@@ -415,22 +417,28 @@ https://api.partnercenter.microsoft.com/insights/v1/mpn/
 
 This is the **partner-global** Insights analytics surface (`/mpn/`), distinct from the commerce REST API (`/v1/`). It is asynchronous: data is delivered as scheduled report executions, not as a direct GET response.
 
+The Microsoft Learn [Partner insights reports and data definitions](https://learn.microsoft.com/en-us/partner-center/insights/insights-data-definitions) page is the human-readable schema dictionary for interpreting exported columns. Runtime query generation deliberately uses `/ScheduledDataset.selectableColumns` instead of hard-coded documentation columns, because the docs can change independently from a partner tenant's current entitlement/schema. Each Insights metadata sidecar carries both this data-definitions URL and the system-query reference URL for lineage.
+
 ### 7.2 Collection Pattern (per the Microsoft "programmatic access paradigm")
 
 | Step | Call | Purpose |
 |------|------|---------|
 | 1 | `GET /ScheduledDataset` | Enumerate **all datasets** (tables, selectable columns, metrics, time ranges). Stored as JSON. |
 | 2 | `GET /ScheduledQueries` | Enumerate **all queries** (system + user-defined). Stored as JSON. |
-| 3 | `POST /ScheduledQueries` | (Only when needed) create a custom `SELECT … FROM <dataset>` query → returns `queryId`. System query IDs are used where available. |
-| 4 | `POST /ScheduledReport` | Ensure a scheduled report exists for a `queryId` (`RecurrenceInterval` ≥ 4h) → returns `reportId`. Created once, reused. |
-| 5 | `GET /ScheduledReport/execution/{reportId}?executionStatus=Completed&getLatestExecution=true` | Get the latest completed execution → returns `reportAccessSecureLink` (SAS). Returns 404 before the first run (treated as "pending", not an error). |
-| 6 | Download `reportAccessSecureLink` | Fetch the report file (**CSV/TSV**) and **convert to JSON** before storing. |
+| 3 | Store resolved report definitions | Persist the full dataset-to-report plan for auditability before mutation. |
+| 4 | `POST /ScheduledQueries` | (Only when needed) create a custom `SELECT <selectableColumns> FROM <dataset>` query → returns `queryId`. `SELECT *` is not valid; datasets without selectable columns are skipped for generated queries. System query IDs are used only when present and compatible with the live dataset schema. Creation responses are stored as JSON. |
+| 5 | `POST /ScheduledReport` | Ensure an `Active` scheduled report exists for a `queryId` using the dataset's `minimumRecurrenceInterval` clamped to 4..2160h and a `StartTime` at least 4h in the future → returns `reportId`. Paused/inactive/exhausted reports are recreated. Creation responses are stored as run evidence; the scheduled-report inventory is stored once as current state. |
+| 6 | `GET /ScheduledReport/execution/{reportId}?executionStatus=Completed&getLatestExecution=true` | Poll for the latest completed execution → returns `reportAccessSecureLink` (SAS) once ready. Requested reports can take hours; 404/no execution before first completion is treated as "pending", not an error. |
+| 7 | Download `reportAccessSecureLink` | Fetch the report file (**CSV/TSV**) and **convert to JSON** before storing, unless the same `executionId` was already stored by a prior run. |
 
 ### 7.3 Idempotency & efficiency
 
-- Reports are matched by a deterministic name (`<prefix><DatasetName>`) and created only if absent.
-- The latest completed execution for each report is downloaded and stored on every collection cycle, even when the `executionId` matches a prior run. This keeps every cycle as a full collection snapshot.
-- Every dataset returned by step 1 that is not explicitly registered also gets a generated `SELECT`-all report, guaranteeing **all datasets** are exported.
+- Reports are matched by a deterministic base name (`<prefix><DatasetName>`) and reused only while `reportStatus = Active`; non-active reports are recreated with a timestamped suffix so collection does not stall after recurrence exhaustion or a pause.
+- The latest completed execution metadata for each report is stored on every collection cycle. The report payload itself is downloaded only once per `executionId`, using a small blob marker to avoid repeated SAS egress for unchanged daily datasets.
+- The Create Report API is asynchronous: a successful `reportId` means the report was requested, not that data is available. Later cycles continue polling until a completed execution returns a secure download link, then the CSV/TSV payload is saved as JSON.
+- The scheduled-report inventory is a singleton current-state artifact at `_collection-state/<tenant>/partner-insights-reports/scheduled-reports.json`, overwritten on every run. It is deliberately not written as timestamped run output.
+- Registry system-query entries are used only when the corresponding dataset appears in `/ScheduledDataset` and their projected columns are present in live `selectableColumns`; otherwise the collector falls back to a generated explicit-column query for that dataset.
+- Every dataset returned by step 1 that is not explicitly registered gets a generated explicit-column report when it publishes `selectableColumns`; column-less datasets are skipped because Partner Center's query grammar has no wildcard projection.
 
 ### 7.4 Authentication note
 
@@ -839,9 +847,9 @@ Because collection is **partner-global**, volume is driven by *datasets + score 
 | Frequency | Items                                                                                  |
 |-----------|----------------------------------------------------------------------------------------|
 | Every 6h  | Partner Security Score, requirements, customerInsights                                  |
-| Every 4h UTC | Security score history; all Insights datasets/queries catalog; all Insights report downloads |
+| Every 4h UTC | Security score history; Insights datasets/queries catalog; latest completed Insights report downloads |
 
-The Insights report `RecurrenceInterval` minimum is **4 hours**, so the scheduled collection cadence is fixed at 00/04/08/12/16/20 UTC. Scheduled reports use `RecurrenceCount = 2190`, which is one year of 4-hour executions. With ~20 datasets + 4 score endpoints collected once at the partner level, a cycle issues on the order of **tens** of API calls — versus the thousands/day implied by the previous per-customer commerce-API fan-out. The solution deliberately performs full-cycle collection: all catalogs and the latest report execution for every dataset are written each eligible cycle. Operator-triggered `ManualStart` runs set `ForceCollection=true`, bypassing only the scheduled cadence gates; per-partner `CollectPartnerInsights` and `CollectPartnerSecurityScore` flags are still enforced by both the orchestrator and collector activities.
+Insights scheduled-report freshness is dataset-driven. The collector reads `minimumRecurrenceInterval` from `/ScheduledDataset` and uses `clamp(max(4, datasetMin), 4, 2160)` for `POST /ScheduledReport`; for example, daily datasets such as `OfficeUsage` are scheduled at 24h rather than forced to 4h. With ~20 datasets + 4 score endpoints collected once at the partner level, a cycle issues on the order of **tens** of API calls — versus the thousands/day implied by the previous per-customer commerce-API fan-out. Each eligible cycle writes catalogs and latest execution metadata; unchanged report payloads are skipped by `executionId` marker to avoid repeated downloads. Operator-triggered `ManualStart` runs set `ForceCollection=true`, bypassing only the scheduled cadence gates; per-partner `CollectPartnerInsights` and `CollectPartnerSecurityScore` flags are still enforced by both the orchestrator and collector activities.
 
 ---
 

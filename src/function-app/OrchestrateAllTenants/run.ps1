@@ -50,7 +50,7 @@ if ($orchInput.PSObject.Properties['ForceCollection']) {
     $forceCollection = [bool]$orchInput.ForceCollection
 }
 
-Write-Host "[$correlationId] OrchestrateAllTenants started. Instance: $($Context.InstanceId); forceCollection=$forceCollection"
+Write-Host "[$correlationId] OrchestrateAllTenants started. Instance: $($Context.InstanceId); maxConcurrentPartners=$maxConcurrentPartners; maxConcurrentEndpoints=$maxConcurrentEndpoints; forceCollection=$forceCollection"
 
 # Step 1: Load tenant configuration
 $tenantsConfig = Invoke-DurableActivity -FunctionName 'LoadTenantConfig' -Input $correlationId

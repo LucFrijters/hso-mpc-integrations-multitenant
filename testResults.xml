@@ -1,0 +1,149 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="48" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-06-19" time="19:37:12">
+  <environment platform="Microsoft Windows 11 Enterprise|C:\WINDOWS|\Device\Harddisk0\Partition3" clr-version="10.0.8" machine-name="NB-4W3ZNH4" nunit-version="2.5.8.0" user="LucFrijters" cwd="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc" user-domain="AzureAD" os-version="10.0.26200" />
+  <culture-info current-culture="nl-NL" current-uiculture="en-US" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="0.4975" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc\tests\EndpointRegistry.Tests.ps1" executed="True" result="Success" success="True" time="0.1013" asserts="0" description="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc\tests\EndpointRegistry.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="EndpointRegistry — structure" executed="True" result="Success" success="True" time="0.0061" asserts="0" description="EndpointRegistry — structure">
+            <results>
+              <test-case description="exposes the three collection groups" name="EndpointRegistry — structure.exposes the three collection groups" time="0.0016" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="EndpointRegistry — Partner Security Score (CSP scores)" executed="True" result="Success" success="True" time="0.0229" asserts="0" description="EndpointRegistry — Partner Security Score (CSP scores)">
+            <results>
+              <test-case description="every security endpoint is Graph beta with required fields" name="EndpointRegistry — Partner Security Score (CSP scores).every security endpoint is Graph beta with required fields" time="0.0096" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes customerInsights (all CSP customers in one call)" name="EndpointRegistry — Partner Security Score (CSP scores).includes customerInsights (all CSP customers in one call)" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="covers score, requirements and history" name="EndpointRegistry — Partner Security Score (CSP scores).covers score, requirements and history" time="0.0015" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does NOT reference the non-existent securityAlerts endpoint" name="EndpointRegistry — Partner Security Score (CSP scores).does NOT reference the non-existent securityAlerts endpoint" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="EndpointRegistry — Partner Insights catalog" executed="True" result="Success" success="True" time="0.0289" asserts="0" description="EndpointRegistry — Partner Insights catalog">
+            <results>
+              <test-case description="collects datasets and queries from the Insights surface" name="EndpointRegistry — Partner Insights catalog.collects datasets and queries from the Insights surface" time="0.0019" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="EndpointRegistry — Partner Insights reports" executed="True" result="Success" success="True" time="0.055" asserts="0" description="EndpointRegistry — Partner Insights reports">
+            <results>
+              <test-case description="every report definition names a dataset" name="EndpointRegistry — Partner Insights reports.every report definition names a dataset" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="seeds known datasets with Microsoft system query IDs" name="EndpointRegistry — Partner Insights reports.seeds known datasets with Microsoft system query IDs" time="0.0019" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="includes all documented Partner Insights system queries" name="EndpointRegistry — Partner Insights reports.includes all documented Partner Insights system queries" time="0.0162" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc\tests\InsightsClient.Tests.ps1" executed="True" result="Success" success="True" time="0.1562" asserts="0" description="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc\tests\InsightsClient.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Convert-DelimitedToJson" executed="True" result="Success" success="True" time="0.01" asserts="0" description="Convert-DelimitedToJson">
+            <results>
+              <test-case description="parses CSV header + rows into objects" name="Convert-DelimitedToJson.parses CSV header + rows into objects" time="0.0019" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="parses TSV using a tab delimiter" name="Convert-DelimitedToJson.parses TSV using a tab delimiter" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns an empty JSON array for empty content" name="Convert-DelimitedToJson.returns an empty JSON array for empty content" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="emits a JSON array even for a single row" name="Convert-DelimitedToJson.emits a JSON array even for a single row" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="honours the MaxRows truncation guard" name="Convert-DelimitedToJson.honours the MaxRows truncation guard" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="New-DatasetSelectQuery" executed="True" result="Success" success="True" time="0.019" asserts="0" description="New-DatasetSelectQuery">
+            <results>
+              <test-case description="builds an explicit column projection with a timespan" name="New-DatasetSelectQuery.builds an explicit column projection with a timespan" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="omits TIMESPAN when the dataset publishes no available date ranges" name="New-DatasetSelectQuery.omits TIMESPAN when the dataset publishes no available date ranges" time="0.0008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="throws instead of generating an invalid SELECT wildcard" name="New-DatasetSelectQuery.throws instead of generating an invalid SELECT wildcard" time="0.0016" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Partner Insights dataset recurrence and date ranges" executed="True" result="Success" success="True" time="0.0266" asserts="0" description="Partner Insights dataset recurrence and date ranges">
+            <results>
+              <test-case description="clamps dataset minimum recurrence to the Partner Center allowed range" name="Partner Insights dataset recurrence and date ranges.clamps dataset minimum recurrence to the Partner Center allowed range" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reads minimumRecurrenceInterval and availableDateRanges from dataset metadata" name="Partner Insights dataset recurrence and date ranges.reads minimumRecurrenceInterval and availableDateRanges from dataset metadata" time="0.0013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns no TIMESPAN for datasets without availableDateRanges" name="Partner Insights dataset recurrence and date ranges.returns no TIMESPAN for datasets without availableDateRanges" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-InsightsReportName" executed="True" result="Success" success="True" time="0.0314" asserts="0" description="Get-InsightsReportName">
+            <results>
+              <test-case description="prefixes the dataset name deterministically (idempotent ensure key)" name="Get-InsightsReportName.prefixes the dataset name deterministically (idempotent ensure key)" time="0.0009" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Get-InsightsQueryName" executed="True" result="Success" success="True" time="0.0368" asserts="0" description="Get-InsightsQueryName">
+            <results>
+              <test-case description="builds names accepted by ScheduledQueries: alphanumerics and whitespace only" name="Get-InsightsQueryName.builds names accepted by ScheduledQueries: alphanumerics and whitespace only" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Register-InsightsReport" executed="True" result="Success" success="True" time="0.0432" asserts="0" description="Register-InsightsReport">
+            <results>
+              <test-case description="reuses an existing report and returns its query id without creating anything" name="Register-InsightsReport.reuses an existing report and returns its query id without creating anything" time="0.0021" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Partner Insights response envelopes" executed="True" result="Success" success="True" time="0.0507" asserts="0" description="Partner Insights response envelopes">
+            <results>
+              <test-case description="throws when an HTTP 200 body carries an error statusCode" name="Partner Insights response envelopes.throws when an HTTP 200 body carries an error statusCode" time="0.0015" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="allows successful response envelopes" name="Partner Insights response envelopes.allows successful response envelopes" time="0.0022" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Partner Insights scheduled report reuse" executed="True" result="Success" success="True" time="0.0565" asserts="0" description="Partner Insights scheduled report reuse">
+            <results>
+              <test-case description="reuses only Active reports" name="Partner Insights scheduled report reuse.reuses only Active reports" time="0.0013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="matches recreated report names by deterministic base prefix" name="Partner Insights scheduled report reuse.matches recreated report names by deterministic base prefix" time="0.0007" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Partner Insights system query compatibility" executed="True" result="Success" success="True" time="0.0623" asserts="0" description="Partner Insights system query compatibility">
+            <results>
+              <test-case description="extracts query projection columns" name="Partner Insights system query compatibility.extracts query projection columns" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="detects projected columns missing from the live dataset schema" name="Partner Insights system query compatibility.detects projected columns missing from the live dataset schema" time="0.001" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Insights dataset accessors (defensive across field spellings)" executed="True" result="Success" success="True" time="0.0686" asserts="0" description="Insights dataset accessors (defensive across field spellings)">
+            <results>
+              <test-case description="reads the dataset name across spellings" name="Insights dataset accessors (defensive across field spellings).reads the dataset name across spellings" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="extracts columns from string arrays and object arrays" name="Insights dataset accessors (defensive across field spellings).extracts columns from string arrays and object arrays" time="0.0012" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Resolve-InsightsReportsToCollect" executed="True" result="Success" success="True" time="0.0898" asserts="0" description="Resolve-InsightsReportsToCollect">
+            <results>
+              <test-case description="keeps registry entries and adds auto reports for remaining datasets" name="Resolve-InsightsReportsToCollect.keeps registry entries and adds auto reports for remaining datasets" time="0.0047" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not duplicate a dataset already covered by the registry" name="Resolve-InsightsReportsToCollect.does not duplicate a dataset already covered by the registry" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips registry-backed system queries when the dataset is absent from the partner catalog" name="Resolve-InsightsReportsToCollect.skips registry-backed system queries when the dataset is absent from the partner catalog" time="0.0016" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="applies dataset minimum recurrence to registry-backed system query reports" name="Resolve-InsightsReportsToCollect.applies dataset minimum recurrence to registry-backed system query reports" time="0.002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to generated query when a system query references missing live columns" name="Resolve-InsightsReportsToCollect.falls back to generated query when a system query references missing live columns" time="0.0024" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips generated reports for datasets without selectableColumns" name="Resolve-InsightsReportsToCollect.skips generated reports for datasets without selectableColumns" time="0.0013" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ignores datasets when EnsureAllDatasets is disabled" name="Resolve-InsightsReportsToCollect.ignores datasets when EnsureAllDatasets is disabled" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Partner Center MFA validation" executed="True" result="Success" success="True" time="0.0964" asserts="0" description="Partner Center MFA validation">
+            <results>
+              <test-case description="reads isMfaCompliant response headers case-insensitively" name="Partner Center MFA validation.reads isMfaCompliant response headers case-insensitively" time="0.0011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="throws when Partner Center reports a non-MFA-compliant token" name="Partner Center MFA validation.throws when Partner Center reports a non-MFA-compliant token" time="0.0014" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc\tests\IntegrationConfig.Tests.ps1" executed="True" result="Success" success="True" time="0.1275" asserts="0" description="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc\tests\IntegrationConfig.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Get-ApiSurfaceTokenScope" executed="True" result="Success" success="True" time="0.0104" asserts="0" description="Get-ApiSurfaceTokenScope">
+            <results>
+              <test-case description="uses the delegated Partner Center scope for AppPlusUser" name="Get-ApiSurfaceTokenScope.uses the delegated Partner Center scope for AppPlusUser" time="0.003" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="uses the application .default scope for Partner Center AppOnly" name="Get-ApiSurfaceTokenScope.uses the application .default scope for Partner Center AppOnly" time="0.0019" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="adds offline_access for the one-time authorization-code consent flow" name="Get-ApiSurfaceTokenScope.adds offline_access for the one-time authorization-code consent flow" time="0.0015" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Partner Insights documentation references" executed="True" result="Success" success="True" time="0.0285" asserts="0" description="Partner Insights documentation references">
+            <results>
+              <test-case description="exposes Microsoft Learn schema and system-query reference URLs" name="Partner Insights documentation references.exposes Microsoft Learn schema and system-query reference URLs" time="0.0141" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc\tests\TokenService.Tests.ps1" executed="True" result="Success" success="True" time="0.1125" asserts="0" description="C:\Users\LucFrijters\LPTF\LPTF - Dev - lptf-codebase\integrations\hso-mpc-integration-multi-insightreports-psc\tests\TokenService.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="TokenService — New-ClientAssertionJwt" executed="True" result="Success" success="True" time="0.0142" asserts="0" description="TokenService — New-ClientAssertionJwt">
+            <results>
+              <test-case description="returns a three-part JWT string" name="TokenService — New-ClientAssertionJwt.returns a three-part JWT string" time="0.002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="uses the RS256 header with an x5t thumbprint" name="TokenService — New-ClientAssertionJwt.uses the RS256 header with an x5t thumbprint" time="0.002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="targets the tenant token endpoint as audience and the client as issuer/subject" name="TokenService — New-ClientAssertionJwt.targets the tenant token endpoint as audience and the client as issuer/subject" time="0.002" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="produces a signature verifiable with the certificate public key" name="TokenService — New-ClientAssertionJwt.produces a signature verifiable with the certificate public key" time="0.0041" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>

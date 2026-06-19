@@ -1,6 +1,7 @@
 param($Request, $StarterClient)
 
 $ErrorActionPreference = 'Stop'
+$null = $Request
 
 try {
     $result = Start-CollectionOrchestration `

@@ -70,12 +70,90 @@ function Invoke-ApiWithRetry {
             }
             else {
                 # 400, 401, 403, etc. — permanent for this call; do not retry.
-                throw
+                throw (New-HttpErrorMessage -Uri $Uri -Method $Method -Response $_.Exception.Response -FallbackMessage $_.Exception.Message -ErrorDetailsMessage $_.ErrorDetails.Message)
             }
         }
     }
 
     throw "API call to $Uri failed after $MaxRetries attempts"
+}
+
+
+function Get-HttpErrorBody {
+    <#
+    .SYNOPSIS
+        Extracts an HTTP error response body across PowerShell/.NET response shapes.
+    #>
+    [CmdletBinding()]
+    param($Response)
+
+    if (-not $Response) { return $null }
+
+    try {
+        $stream = $Response.GetResponseStream()
+        if ($stream) {
+            $reader = [System.IO.StreamReader]::new($stream)
+            try { return $reader.ReadToEnd() }
+            finally { $reader.Dispose() }
+        }
+    }
+    catch {
+        Write-Verbose "Could not read HTTP error response stream: $($_.Exception.Message)"
+    }
+
+    try {
+        if ($Response.Content) {
+            if ($Response.Content.PSObject.Methods.Name -contains 'ReadAsStringAsync') {
+                return $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            }
+            return [string]$Response.Content
+        }
+    }
+    catch {
+        Write-Verbose "Could not read HTTP error response content: $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
+
+function New-HttpErrorMessage {
+    <#
+    .SYNOPSIS
+        Builds a richer permanent HTTP error message including the response body when available.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$Uri,
+        [string]$Method,
+        $Response,
+        [string]$FallbackMessage,
+        [string]$ErrorDetailsMessage
+    )
+
+    $statusCode = $null
+    $reasonPhrase = $null
+    if ($Response) {
+        try { $statusCode = [int]$Response.StatusCode } catch { Write-Verbose "Could not read HTTP response status code: $($_.Exception.Message)" }
+        try { $reasonPhrase = [string]$Response.ReasonPhrase } catch { Write-Verbose "Could not read HTTP response reason phrase: $($_.Exception.Message)" }
+        if (-not $reasonPhrase) {
+            try { $reasonPhrase = [string]$Response.StatusDescription } catch { Write-Verbose "Could not read HTTP response status description: $($_.Exception.Message)" }
+        }
+    }
+
+    $message = if ($statusCode) { "HTTP $statusCode" } else { $FallbackMessage }
+    if ($reasonPhrase) { $message += " $reasonPhrase" }
+    $message += " for $Method $Uri"
+
+    $body = $ErrorDetailsMessage
+    if ([string]::IsNullOrWhiteSpace($body)) {
+        $body = Get-HttpErrorBody -Response $Response
+    }
+    if (-not [string]::IsNullOrWhiteSpace($body)) {
+        $message += ": $body"
+    }
+
+    return $message
 }
 
 
@@ -175,5 +253,7 @@ function Invoke-GraphBetaApi {
 Export-ModuleMember -Function @(
     'Invoke-ApiWithRetry'
     'Get-RetryAfterSeconds'
+    'Get-HttpErrorBody'
+    'New-HttpErrorMessage'
     'Invoke-GraphBetaApi'
 )

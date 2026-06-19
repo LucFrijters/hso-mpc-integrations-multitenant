@@ -88,12 +88,15 @@ function Get-IntegrationConfig {
             # Partner Center Insights requires Secure Application Model App+User auth with MFA.
             AuthMode                = 'AppPlusUser'
             ReportNamePrefix        = 'hso-auto-' # $env:INSIGHTS_REPORT_PREFIX ?? 'hso-auto-'
-            # RecurrenceInterval minimum enforced by the API is 4h. Count is 1 year of 4-hour runs.
+            DataDefinitionsUrl      = 'https://learn.microsoft.com/en-us/partner-center/insights/insights-data-definitions'
+            SystemQueriesUrl        = 'https://learn.microsoft.com/en-us/partner-center/insights/insights-programmatic-system-queries'
+            # Fallback only. Actual scheduled reports use each dataset's minimumRecurrenceInterval
+            # clamped to Partner Center's 4..2160 hour bounds.
             RecurrenceIntervalHours = 4
             RecurrenceCount         = 2190
             ReportFormat            = Get-EnvironmentValue -Name 'INSIGHTS_REPORT_FORMAT' -DefaultValue 'CSV'        # CSV | TSV
-            # When true, ensure a SELECT-all report for every dataset returned by
-            # ScheduledDataset (covers "all datasets"); registry entries take precedence.
+            # When true, ensure explicit-column reports for datasets returned by
+            # ScheduledDataset; registry entries take precedence and column-less datasets are skipped.
             EnsureAllDatasets       = $true
             # Max rows of CSV to parse into JSON in a single activity (memory guard).
             MaxRowsPerReport        = [int](Get-EnvironmentValue -Name 'INSIGHTS_MAX_ROWS_PER_REPORT' -DefaultValue '1000000')

@@ -19,3 +19,11 @@ Describe 'Get-ApiSurfaceTokenScope' {
         Should -Be 'offline_access https://api.partnercenter.microsoft.com/user_impersonation'
     }
 }
+
+Describe 'Partner Insights documentation references' {
+    It 'exposes Microsoft Learn schema and system-query reference URLs' {
+        $config = Get-IntegrationConfig
+        $config.Insights.DataDefinitionsUrl | Should -Be 'https://learn.microsoft.com/en-us/partner-center/insights/insights-data-definitions'
+        $config.Insights.SystemQueriesUrl | Should -Be 'https://learn.microsoft.com/en-us/partner-center/insights/insights-programmatic-system-queries'
+    }
+}

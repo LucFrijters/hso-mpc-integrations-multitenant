@@ -10,7 +10,7 @@ Centralized, partner-global collection of **Microsoft Partner Center Insights** 
 |-------------|-----|------|---------|
 | Insights **datasets** catalog | `GET /insights/v1/mpn/ScheduledDataset` | Partner Center SAM App+User token (`user_impersonation`) | Every 4h UTC |
 | Insights **queries** catalog | `GET /insights/v1/mpn/ScheduledQueries` | Partner Center SAM App+User token (`user_impersonation`) | Every 4h UTC |
-| Insights **report data** (every dataset) | `ScheduledReport` -> `ScheduledReport/execution` -> SAS download | Partner Center SAM App+User token (`user_impersonation`) | Every 4h UTC |
+| Insights **report definitions, executions, and data** | `ScheduledReport` -> `ScheduledReport/execution` -> SAS download | Partner Center SAM App+User token (`user_impersonation`) | Polled every 4h; report generation follows each dataset's `minimumRecurrenceInterval` |
 | Partner **Security Score** + requirements + history + **customerInsights** | `GET /beta/security/partner/securityScore[...]` | Graph app-only `PartnerSecurity.Read.All` | Every 4h / 6h by endpoint |
 
 ## Topology — partner-global, not per-customer
@@ -24,11 +24,16 @@ The partner-account list lives in the Key Vault secret `tenants-config` (normall
 The Insights API does not return data on a simple GET. The `CollectInsights` activity:
 
 1. enumerates all datasets and queries (stored directly as JSON);
-2. resolves the reports to collect (registry-seeded system queries, plus a generated `SELECT` report for every other dataset so all datasets are exported);
-3. **idempotently ensures** a scheduled report exists per dataset (created once, reused thereafter — `RecurrenceInterval` minimum is 4h, so the collection cadence is every 4 hours UTC);
-4. downloads the latest **completed** execution via its secure SAS link and **converts the CSV/TSV payload to JSON** before storing.
+2. resolves the reports to collect (registry-seeded system queries when they match the live dataset schema, plus generated explicit-column `SELECT` reports for every other dataset that publishes `selectableColumns`);
+3. writes the resolved report definitions to blob;
+4. **idempotently ensures** an **Active** scheduled report exists per dataset (paused/inactive/exhausted reports are recreated, using each dataset's `minimumRecurrenceInterval` clamped to Partner Center's 4..2160 hour bounds);
+5. stores created query/report responses and the scheduled-report inventory as current state;
+6. polls for the latest **completed** execution; newly requested reports can take hours, so 404/no execution is stored as pending rather than treated as failure;
+7. downloads a completed execution via its secure SAS link only when that `executionId` has not already been stored, then **converts the CSV/TSV payload to JSON** before storing.
 
-The collection is intentionally full-cycle: every run writes the current catalog and the latest completed report execution for every dataset, even when the latest `executionId` matches a prior run.
+The collection is intentionally full-cycle for control-plane state: every run writes the current catalog and latest execution metadata for every scheduled dataset report. Data payload downloads are deduplicated by `executionId` to avoid repeated egress for daily datasets polled every 4 hours.
+
+Microsoft Learn's Partner Insights data definitions page is treated as the human-readable schema reference. The collector still uses the live `/ScheduledDataset` response as the runtime source of truth because tenant entitlements and column names can drift; blob metadata includes links to both the data definitions and system query references.
 
 ## Blob layout
 
@@ -40,12 +45,20 @@ mpc-insights-data-raw/
     2026061916/
       partner-insights-reports/
         datasets_2026-06-19T16-00-00Z.json
+        report-definitions_2026-06-19T16-00-00Z.json
+        customersandtenants-execution_2026-06-19T16-00-00Z_<execution-id>.json
         customersandtenants_2026-06-19T16-00-00Z_<execution-id>.json
       security-score/
         security-score_2026-06-19T16-00-00Z.json
+  _collection-state/
+    hso-production_<tenant-id>/
+      partner-insights-reports/
+        scheduled-reports.json
+        scheduled-reports_metadata.json
 ```
 
 Each data file has a matching `*_metadata.json` sidecar in the same folder. The date-hour folder uses UTC `yyyyMMddHH`, matching the 4-hour collection interval.
+Singleton control-plane state, such as the scheduled-report inventory, is stored under `_collection-state` and overwritten on each run so there is one source of truth.
 
 ## Repository structure
 
