@@ -38,7 +38,7 @@ try {
             Write-Host "[$correlationId] LoadTenantConfig: WARNING - skipping partner entry with missing TenantId"
             continue
         }
-        $validPartners += @{
+        $validPartners += [pscustomobject]@{
             TenantId                    = $p.TenantId
             DisplayName                 = $p.DisplayName ?? "partner-$($p.TenantId.Substring(0,8))"
             Enabled                     = $p.Enabled -ne $false           # default enabled

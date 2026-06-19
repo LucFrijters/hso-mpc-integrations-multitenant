@@ -103,9 +103,9 @@ The solution is designed for **enterprise-grade reliability**, aligned with the 
 │  │  ┌─────────────┐    ┌──────────────────────────────────────────┐ │   │
 │  │  │  Timer       │───▶│  Orchestrator: OrchestrateAllTenants    │ │   │
 │  │  │  Trigger     │    │                                          │ │   │
-│  │  │  (2-hour)    │    │  For each partner account (fan-out):     │ │   │
+│  │  │  (2-hour)    │    │  For each partner account:               │ │   │
 │  │  └─────────────┘    │    ┌──────────────────────────────┐      │ │   │
-│  │                      │    │ Sub-Orch: OrchestrateTenant  │      │ │   │
+│  │                      │    │ Inline partner collection    │      │ │   │
 │  │                      │    │                              │      │ │   │
 │  │                      │    │  1. AcquireToken (activity)  │      │ │   │
 │  │                      │    │  2. Fan-out per endpoint:    │      │ │   │
@@ -117,7 +117,7 @@ The solution is designed for **enterprise-grade reliability**, aligned with the 
 │  │                      │    │  3. Fan-in: collect results  │      │ │   │
 │  │                      │    └──────────────────────────────┘      │ │   │
 │  │                      │                                          │ │   │
-│  │                      │  Fan-in: aggregate results, log summary  │ │   │
+│  │                      │  Aggregate results, log summary          │ │   │
 │  │                      └──────────────────────────────────────────┘ │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │           │              │                │                              │
@@ -597,14 +597,8 @@ Microsoft Partner Center and Graph APIs enforce rate limits. A 429 response incl
 │                                                    │
 │  ┌─────────────┐                                  │
 │  │ Orchestrator │                                  │
-│  │ (fan-out)    │── Max 4 partner accounts ──────▶│
+│  │ (partner loop)│── Partner accounts ───────────▶│
 │  └─────────────┘                                  │
-│        │                                          │
-│        ▼                                          │
-│  ┌─────────────────┐                              │
-│  │ Sub-Orchestrator │                              │
-│  │ (per partner)    │── Max 5 concurrent calls ──▶│
-│  └─────────────────┘                              │
 │        │                                          │
 │        ▼                                          │
 │  ┌─────────────────┐                              │
@@ -627,7 +621,7 @@ Microsoft Partner Center and Graph APIs enforce rate limits. A 429 response incl
 
 | Level             | Max Concurrency | Rationale                                           |
 |-------------------|-----------------|-----------------------------------------------------|
-| Partner fan-out   | 4               | Partner accounts are few; keeps global API load bounded |
+| Partner loop      | 4 configured; current PowerShell path processes partners inline | Partner accounts are few; keeps global API load bounded |
 | Endpoint fan-out  | 5 per partner   | Per-partner rate limit safety margin                 |
 | Retry attempts    | 3               | Balance between reliability and not amplifying load  |
 
@@ -636,7 +630,7 @@ Microsoft Partner Center and Graph APIs enforce rate limits. A 429 response incl
 Retry is handled inside each activity function using `Invoke-ApiWithRetry` (see `modules/ApiClient.psm1`):
 
 ```powershell
-# In the OrchestrateTenant sub-orchestrator, the fan-out calls:
+# In OrchestrateAllTenants, endpoint fan-out calls:
 $task = Invoke-DurableActivity -FunctionName 'CollectSecurityScore' -Input @{
     TenantId        = $tenantId
     AccessToken     = $token
@@ -850,7 +844,7 @@ Because collection is **partner-global**, volume is driven by *datasets + score 
 | Every 6h  | Partner Security Score, requirements, customerInsights                                  |
 | Every 4h UTC | Security score history; all Insights datasets/queries catalog; all Insights report downloads |
 
-The Insights report `RecurrenceInterval` minimum is **4 hours**, so the collection cadence is fixed at 00/04/08/12/16/20 UTC. Scheduled reports use `RecurrenceCount = 2190`, which is one year of 4-hour executions. With ~20 datasets + 4 score endpoints collected once at the partner level, a cycle issues on the order of **tens** of API calls — versus the thousands/day implied by the previous per-customer commerce-API fan-out. The solution deliberately performs full-cycle collection: all catalogs and the latest report execution for every dataset are written each cycle.
+The Insights report `RecurrenceInterval` minimum is **4 hours**, so the scheduled collection cadence is fixed at 00/04/08/12/16/20 UTC. Scheduled reports use `RecurrenceCount = 2190`, which is one year of 4-hour executions. With ~20 datasets + 4 score endpoints collected once at the partner level, a cycle issues on the order of **tens** of API calls — versus the thousands/day implied by the previous per-customer commerce-API fan-out. The solution deliberately performs full-cycle collection: all catalogs and the latest report execution for every dataset are written each eligible cycle. Operator-triggered `ManualStart` runs set `ForceCollection=true`, bypassing only the scheduled cadence gates; per-partner `CollectPartnerInsights` and `CollectPartnerSecurityScore` flags are still enforced by both the orchestrator and collector activities.
 
 ---
 
@@ -887,10 +881,10 @@ hso-mpc-integrations-multitenant/
 │       ├── TimerStart/                       # Timer trigger, default every 2 hours
 │       │   ├── function.json
 │       │   └── run.ps1
-│       ├── OrchestrateAllTenants/            # Main orchestrator (partner-account fan-out)
+│       ├── OrchestrateAllTenants/            # Main orchestrator (partner loop + endpoint fan-out)
 │       │   ├── function.json
 │       │   └── run.ps1
-│       ├── OrchestrateTenant/                # Per-partner sub-orchestrator
+│       ├── OrchestrateTenant/                # Legacy sub-orchestrator kept for reference
 │       │   ├── function.json
 │       │   └── run.ps1
 │       ├── AcquireToken/                     # Activity: cert-based token

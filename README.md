@@ -48,8 +48,8 @@ The collection is intentionally full-cycle: every run writes the current catalog
 │   │   └── OrchestrationStarter.psm1 Shared Durable orchestration starter
 │   ├── TimerStart/                  Timer trigger (fixed every 2h)
 │   ├── ManualStart/                 HTTP trigger for operator-started collection cycles
-│   ├── OrchestrateAllTenants/       Fan-out across partner accounts
-│   ├── OrchestrateTenant/           Per-partner orchestration (security score + insights)
+│   ├── OrchestrateAllTenants/       Partner orchestration + endpoint activity fan-out
+│   ├── OrchestrateTenant/           Legacy sub-orchestrator kept for reference
 │   ├── AcquireToken/                Token activity (Graph AppOnly / Partner Insights AppPlusUser)
 │   ├── CollectSecurityScore/        Activity: one Graph security-score endpoint → JSON
 │   ├── CollectInsights/             Activity: full Insights flow → JSON
@@ -89,7 +89,7 @@ CI uses the same safety rule: the package job stages `src/function-app` first an
 
 ## Manual collection trigger
 
-Use the `ManualStart` HTTP function for operator-triggered collection cycles. It starts the same Durable orchestration as `TimerStart`, but avoids the Azure Portal timer-trigger hostruntime path that can return `404 NotFound` even when the function is indexed.
+Use the `ManualStart` HTTP function for operator-triggered collection cycles. It starts the same Durable orchestration as `TimerStart`, but sets `ForceCollection=true` so the run bypasses the normal cadence gates. It still respects each partner's `CollectPartnerInsights` and `CollectPartnerSecurityScore` flags, so only enabled data sources are invoked. It also avoids the Azure Portal timer-trigger hostruntime path that can return `404 NotFound` even when the function is indexed.
 
 ```powershell
 $manualKey = az functionapp keys list `

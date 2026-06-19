@@ -23,9 +23,10 @@ param($InputData)
         RegistryReports : array   - InsightsReports definitions from the registry
         EnsureAllDatasets : bool
         TriggeredAtUtc  : string
+        CollectPartnerInsights : bool - defensive tenant source flag
 #>
 
-$params = $InputData | ConvertFrom-Json
+$params = if ($InputData -is [string]) { $InputData | ConvertFrom-Json } else { $InputData }
 $correlationId = $params.CorrelationId
 $tenantId = $params.TenantId
 $tenantName = $params.TenantName
@@ -35,8 +36,24 @@ $insightsCatalog = $params.InsightsCatalog
 $registryReports = $params.RegistryReports
 $ensureAllDatasets = [bool]$params.EnsureAllDatasets
 $triggeredAtUtc = $params.TriggeredAtUtc
+$collectPartnerInsights = $true
+if ($params.PSObject.Properties['CollectPartnerInsights']) {
+    $collectPartnerInsights = [bool]$params.CollectPartnerInsights
+}
 
 $logPrefix = "[$correlationId][$tenantName][insights]"
+if (-not $collectPartnerInsights) {
+    Write-Host "$logPrefix CollectInsights: skipped because CollectPartnerInsights=false"
+    return @{
+        EndpointName    = 'partner-insights'
+        ApiSurface      = 'partner-insights'
+        Category        = 'insights'
+        Status          = 'Skipped'
+        InsightsSummary = $null
+        Error           = 'CollectPartnerInsights=false'
+    }
+}
+
 Write-Host "$logPrefix CollectInsights: starting"
 
 $timestamp = [DateTimeOffset]::Parse($triggeredAtUtc)

@@ -15,17 +15,37 @@ param($InputData)
         Endpoint       : object  - security score endpoint definition from the registry
         AccessToken    : string  - Microsoft Graph access token (AppOnly, PartnerSecurity.Read.All)
         TriggeredAtUtc : string
+        CollectPartnerSecurityScore : bool - defensive tenant source flag
 #>
 
-$params = $InputData | ConvertFrom-Json
+$params = if ($InputData -is [string]) { $InputData | ConvertFrom-Json } else { $InputData }
 $correlationId = $params.CorrelationId
 $tenantId = $params.TenantId
 $tenantName = $params.TenantName
 $endpoint = $params.Endpoint
 $accessToken = $params.AccessToken
 $triggeredAtUtc = $params.TriggeredAtUtc
+$collectPartnerSecurityScore = $true
+if ($params.PSObject.Properties['CollectPartnerSecurityScore']) {
+    $collectPartnerSecurityScore = [bool]$params.CollectPartnerSecurityScore
+}
 
 $logPrefix = "[$correlationId][$tenantName][$($endpoint.Name)]"
+if (-not $collectPartnerSecurityScore) {
+    Write-Host "$logPrefix CollectSecurityScore: skipped because CollectPartnerSecurityScore=false"
+    return @{
+        EndpointName = $endpoint.Name
+        ApiSurface   = $endpoint.ApiSurface
+        Category     = $endpoint.Category
+        Status       = 'Skipped'
+        RecordCount  = 0
+        BlobPath     = $null
+        BytesWritten = 0
+        DurationMs   = 0
+        Error        = 'CollectPartnerSecurityScore=false'
+    }
+}
+
 Write-Host "$logPrefix CollectSecurityScore: starting"
 
 $collectionStartUtc = [DateTimeOffset]::UtcNow
@@ -90,7 +110,8 @@ try {
         Error        = $null
     }
 
-} catch {
+}
+catch {
     $stopwatch.Stop()
     $errorMsg = $_.Exception.Message
     Write-Host "$logPrefix CollectSecurityScore: FAILED - $errorMsg"

@@ -2,7 +2,11 @@ param($Context)
 
 <#
 .SYNOPSIS
-    Per-partner sub-orchestrator. Collects two PARTNER-GLOBAL data sources for one partner account:
+    Legacy per-partner sub-orchestrator kept for reference. The PowerShell 7.6 built-in Durable SDK
+    used by this deployment does not expose Invoke-DurableSubOrchestrator, so the live path performs
+    this logic inline in OrchestrateAllTenants. This function is not invoked by the current route.
+
+    Collects two PARTNER-GLOBAL data sources for one partner account:
       - Partner Security Score (Microsoft Graph beta) — fanned out per endpoint.
       - Partner Insights datasets/queries/reports — a single CollectInsights activity.
 
@@ -19,6 +23,7 @@ param($Context)
         CollectPartnerInsights      : bool
         CollectPartnerSecurityScore : bool
         TriggeredAtUtc         : string
+        ForceCollection        : bool     - manual override: ignore cadence gates
         MaxConcurrentEndpoints : int
 #>
 
@@ -39,6 +44,10 @@ $collectPartnerSecurityScore = $true
 if ($orchInput.PSObject.Properties['CollectPartnerSecurityScore']) {
     $collectPartnerSecurityScore = [bool]$orchInput.CollectPartnerSecurityScore
 }
+$forceCollection = $false
+if ($orchInput.PSObject.Properties['ForceCollection']) {
+    $forceCollection = [bool]$orchInput.ForceCollection
+}
 
 $logPrefix = "[$correlationId][$tenantName]"
 Write-Host "$logPrefix OrchestrateTenant (partner-global) started for $tenantId"
@@ -55,19 +64,24 @@ try {
     # ── Step 1: which security endpoints run this cycle? ─────────────────
     $activeSecurity = @()
     if ($collectPartnerSecurityScore) {
-        $activeSecurity = @($securityEndpoints | Where-Object {
-                switch ($_.Frequency) {
-                    'Hourly' { $true }
-                    'Every4h' { $isEvery4hCycle }
-                    'Every6h' { ($currentHourUtc % 6) -eq 0 }
-                    default { $true }
-                }
-            })
+        $activeSecurity = if ($forceCollection) {
+            @($securityEndpoints)
+        }
+        else {
+            @($securityEndpoints | Where-Object {
+                    switch ($_.Frequency) {
+                        'Hourly' { $true }
+                        'Every4h' { $isEvery4hCycle }
+                        'Every6h' { ($currentHourUtc % 6) -eq 0 }
+                        default { $true }
+                    }
+                })
+        }
     }
 
-    $includeInsights = $collectPartnerInsights -and $isEvery4hCycle
+    $includeInsights = $collectPartnerInsights -and ($isEvery4hCycle -or $forceCollection)
 
-    Write-Host "$logPrefix Active security endpoints: $($activeSecurity.Count)/$($securityEndpoints.Count); includeInsights=$includeInsights; collectPartnerInsights=$collectPartnerInsights; collectPartnerSecurityScore=$collectPartnerSecurityScore"
+    Write-Host "$logPrefix Active security endpoints: $($activeSecurity.Count)/$($securityEndpoints.Count); includeInsights=$includeInsights; collectPartnerInsights=$collectPartnerInsights; collectPartnerSecurityScore=$collectPartnerSecurityScore; forceCollection=$forceCollection"
 
     # ── Step 2: Partner Security Score (Graph, AppOnly) ──────────────────
     if ($activeSecurity.Count -gt 0) {
@@ -98,12 +112,13 @@ try {
                 $tasks = @()
                 foreach ($ep in $batch) {
                     $activityInput = @{
-                        CorrelationId  = $correlationId
-                        TenantId       = $tenantId
-                        TenantName     = $tenantName
-                        Endpoint       = $ep
-                        AccessToken    = $graphToken.AccessToken
-                        TriggeredAtUtc = $triggeredAtUtc
+                        CorrelationId               = $correlationId
+                        TenantId                    = $tenantId
+                        TenantName                  = $tenantName
+                        Endpoint                    = $ep
+                        AccessToken                 = $graphToken.AccessToken
+                        TriggeredAtUtc              = $triggeredAtUtc
+                        CollectPartnerSecurityScore = $collectPartnerSecurityScore
                     } | ConvertTo-Json -Depth 10 -Compress
 
                     $tasks += Invoke-DurableActivity -FunctionName 'CollectSecurityScore' -Input $activityInput -NoWait
@@ -138,15 +153,16 @@ try {
         }
         else {
             $insightsInput = @{
-                CorrelationId     = $correlationId
-                TenantId          = $tenantId
-                TenantName        = $tenantName
-                AccessToken       = $insightsToken.AccessToken
-                InsightsAuthMode  = $insightsToken.AuthMode
-                InsightsCatalog   = $insightsCatalog
-                RegistryReports   = $insightsReports
-                EnsureAllDatasets = $true
-                TriggeredAtUtc    = $triggeredAtUtc
+                CorrelationId          = $correlationId
+                TenantId               = $tenantId
+                TenantName             = $tenantName
+                AccessToken            = $insightsToken.AccessToken
+                InsightsAuthMode       = $insightsToken.AuthMode
+                InsightsCatalog        = $insightsCatalog
+                RegistryReports        = $insightsReports
+                EnsureAllDatasets      = $true
+                TriggeredAtUtc         = $triggeredAtUtc
+                CollectPartnerInsights = $collectPartnerInsights
             } | ConvertTo-Json -Depth 10 -Compress
 
             $insightsResult = Invoke-DurableActivity -FunctionName 'CollectInsights' -Input $insightsInput
@@ -177,6 +193,7 @@ try {
         ItemsPartial       = $partial
         ItemsSkipped       = $skipped
         CircuitBreakerOpen = ($circuitBreakerFailures -ge $circuitBreakerThreshold)
+        ForceCollection    = $forceCollection
         CompletedUtc       = $Context.CurrentUtcDateTime.ToString('o')
         Details            = $results
     }

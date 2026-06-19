@@ -470,12 +470,14 @@ function Register-InsightsReport {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Definition,
-        [Parameter(Mandatory)][AllowEmptyCollection()]$ExistingReports,
+        [AllowNull()][AllowEmptyCollection()]$ExistingReports = @(),
         [Parameter(Mandatory)][string]$AccessToken,
         [Parameter(Mandatory)]$Config,
         [string]$CorrelationId = [guid]::NewGuid().ToString(),
         [switch]$RequireMfaCompliance
     )
+
+    if ($null -eq $ExistingReports) { $ExistingReports = @() }
 
     $reportName = Get-InsightsReportName -DatasetName $Definition.DatasetName -Config $Config
 

@@ -6,13 +6,15 @@ function Start-CollectionOrchestration {
         [Parameter(Mandatory)]
         [string]$TriggerSource,
 
-        [bool]$IsPastDue = $false
+        [bool]$IsPastDue = $false,
+
+        [bool]$ForceCollection = $false
     )
 
     $correlationId = [guid]::NewGuid().ToString()
     $startTime = [DateTimeOffset]::UtcNow
 
-    Write-Host "[$correlationId] $TriggerSource trigger fired at $($startTime.ToString('o')) (past due: $IsPastDue)"
+    Write-Host "[$correlationId] $TriggerSource trigger fired at $($startTime.ToString('o')) (past due: $IsPastDue; force collection: $ForceCollection)"
 
     $config = Get-IntegrationConfig
 
@@ -21,6 +23,7 @@ function Start-CollectionOrchestration {
         TriggeredAtUtc         = $startTime.ToString('o')
         TriggerSource          = $TriggerSource
         IsPastDue              = $IsPastDue
+        ForceCollection        = $ForceCollection
         MaxConcurrentPartners  = $config.MaxConcurrentPartners
         MaxConcurrentEndpoints = $config.MaxConcurrentEndpoints
     } | ConvertTo-Json -Compress
@@ -53,9 +56,10 @@ function Start-CollectionOrchestration {
     Write-Host "METRIC: collection.orchestration.started = 1 | correlationId=$correlationId orchestrationId=$instanceId triggerSource=$TriggerSource"
 
     [pscustomobject]@{
-        CorrelationId = $correlationId
-        InstanceId    = $instanceId
-        StartedAtUtc  = $startTime.ToString('o')
+        CorrelationId   = $correlationId
+        InstanceId      = $instanceId
+        StartedAtUtc    = $startTime.ToString('o')
+        ForceCollection = $ForceCollection
     }
 }
 

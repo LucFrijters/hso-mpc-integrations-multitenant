@@ -19,7 +19,7 @@ param($InputData)
         AuthMode      : string - 'AppOnly' or 'AppPlusUser' (default: resource-dependent)
 #>
 
-$params = $InputData | ConvertFrom-Json
+$params = if ($InputData -is [string]) { $InputData | ConvertFrom-Json } else { $InputData }
 $correlationId = $params.CorrelationId
 $tenantId = $params.TenantId
 $tenantName = $params.TenantName

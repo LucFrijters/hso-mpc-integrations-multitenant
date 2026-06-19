@@ -567,7 +567,7 @@ Write-Host ""
 Write-Host "  [ ] 6. Configure local development against the main Key Vault (optional):"
 Write-Host "         .\scripts\Initialize-LocalDevelopment.ps1 -Environment $Environment -AppClientId $AppClientId -ValidateKeyVaultAccess" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  [ ] 7. Trigger the first collection cycle manually (optional — otherwise waits for the fixed 2-hour timer cycle):"
+Write-Host "  [ ] 7. Trigger a force collection cycle manually (optional — otherwise waits for the fixed 2-hour timer cycle):"
 Write-Host "         `$manualKey = az functionapp keys list --resource-group $ResourceGroupName --name $functionAppName --query functionKeys.default --output tsv" -ForegroundColor Gray
 Write-Host "         Invoke-RestMethod -Method Post -Uri `"https://$functionAppName.azurewebsites.net/api/collection/start?code=`$manualKey`"" -ForegroundColor Gray
 Write-Host ""

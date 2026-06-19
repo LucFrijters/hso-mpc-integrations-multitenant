@@ -6,13 +6,15 @@ try {
     $result = Start-CollectionOrchestration `
         -StarterClient $StarterClient `
         -TriggerSource 'ManualHttp' `
-        -IsPastDue $false
+        -IsPastDue $false `
+        -ForceCollection $true
 
     $body = @{
         Status          = 'Started'
         CorrelationId   = $result.CorrelationId
         OrchestrationId = $result.InstanceId
         StartedAtUtc    = $result.StartedAtUtc
+        ForceCollection = $result.ForceCollection
     } | ConvertTo-Json -Compress
 
     Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{

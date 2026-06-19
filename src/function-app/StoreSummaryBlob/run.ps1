@@ -6,7 +6,7 @@ param($InputData)
     Uses Write-StringToBlob from BlobStorageService (which has built-in retry).
 #>
 
-$summary = $InputData | ConvertFrom-Json
+$summary = if ($InputData -is [string]) { $InputData | ConvertFrom-Json } else { $InputData }
 $correlationId = $summary.CorrelationId
 
 Write-Host "[$correlationId] StoreSummaryBlob: Writing orchestration summary"
