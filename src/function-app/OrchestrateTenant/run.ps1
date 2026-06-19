@@ -80,6 +80,9 @@ try {
     }
 
     $includeInsights = $collectPartnerInsights -and ($isEvery4hCycle -or $forceCollection)
+    $summaryDataTypes = @()
+    if ($activeSecurity.Count -gt 0) { $summaryDataTypes += 'partner-security-score' }
+    if ($includeInsights) { $summaryDataTypes += 'partner-insights-reports' }
 
     Write-Host "$logPrefix Active security endpoints: $($activeSecurity.Count)/$($securityEndpoints.Count); includeInsights=$includeInsights; collectPartnerInsights=$collectPartnerInsights; collectPartnerSecurityScore=$collectPartnerSecurityScore; forceCollection=$forceCollection"
 
@@ -193,6 +196,7 @@ try {
         ItemsPartial       = $partial
         ItemsSkipped       = $skipped
         CircuitBreakerOpen = ($circuitBreakerFailures -ge $circuitBreakerThreshold)
+        SummaryDataTypes   = $summaryDataTypes
         ForceCollection    = $forceCollection
         CompletedUtc       = $Context.CurrentUtcDateTime.ToString('o')
         Details            = $results

@@ -23,42 +23,62 @@ The partner-account list lives in the Key Vault secret `tenants-config` (normall
 
 The Insights API does not return data on a simple GET. The `CollectInsights` activity:
 
-1. enumerates all datasets and queries (stored directly as JSON);
+1. enumerates all datasets and queries (stored as current catalog files);
 2. resolves the reports to collect (registry-seeded system queries when they match the live dataset schema, plus generated explicit-column `SELECT` reports for every other dataset that publishes `selectableColumns`);
-3. writes the resolved report definitions to blob;
-4. **idempotently ensures** an **Active** scheduled report exists per dataset (paused/inactive/exhausted reports are recreated, using each dataset's `minimumRecurrenceInterval` clamped to Partner Center's 4..2160 hour bounds);
-5. stores created query/report responses and the scheduled-report inventory as current state;
+3. writes the resolved report definitions as current state;
+4. **idempotently ensures** an **Active** scheduled report exists per dataset by creating or reusing the report query and scheduled report (paused/inactive/exhausted reports are recreated, using each dataset's `minimumRecurrenceInterval` clamped to Partner Center's 4..2160 hour bounds);
+5. stores created query/report responses, execution metadata, and the scheduled-report inventory as current state;
 6. polls for the latest **completed** execution; newly requested reports can take hours, so 404/no execution is stored as pending rather than treated as failure;
-7. downloads a completed execution via its secure SAS link only when that `executionId` has not already been stored, then **converts the CSV/TSV payload to JSON** before storing.
+7. downloads a completed execution via its secure SAS link only when that `executionId` has not already been stored, then **converts the CSV/TSV payload to JSON** before storing it under `reports/{yyyyMMddHH}`.
 
-The collection is intentionally full-cycle for control-plane state: every run writes the current catalog and latest execution metadata for every scheduled dataset report. Data payload downloads are deduplicated by `executionId` to avoid repeated egress for daily datasets polled every 4 hours.
+The collection follows the Microsoft Partner Insights async report pattern: create or reuse the report query, create or reuse the scheduled report, poll report executions, and download only completed report links. It intentionally keeps control files separate from completed report payloads:
 
-Microsoft Learn's Partner Insights data definitions page is treated as the human-readable schema reference. The collector still uses the live `/ScheduledDataset` response as the runtime source of truth because tenant entitlements and column names can drift; blob metadata includes links to both the data definitions and system query references.
+- `partner-insights-reports/catalog/`: current `datasets.json` and `queries.json`, plus `catalog/_Archive/` historical snapshots.
+- `partner-insights-reports/_collection-state/`: current report definitions, created query/report evidence, latest execution metadata, scheduled-report inventory, and execution markers, plus `_collection-state/_Archive/` historical snapshots.
+- `partner-insights-reports/reports/{yyyyMMddHH}/`: only completed downloaded report payloads and their `*_metadata.json` sidecars.
+
+Data payload downloads are deduplicated by `executionId` to avoid repeated egress for daily datasets polled every 4 hours.
+
+Microsoft Learn's Partner Insights data definitions page is treated as the human-readable schema reference. The collector still uses the live `/ScheduledDataset` response as the runtime source of truth because tenant entitlements and column names can drift; downloaded report metadata sidecars include links to both the data definitions and system query references.
 
 ## Blob layout
 
-Collection output is written under a shallow tenant/date-hour/data-type layout:
+Collection output is written under a tenant/data-source layout:
+
+Folder entries end with `/`. Every file entry is JSON and must end in `.json`; downloaded report metadata files use `_metadata.json`.
 
 ```text
 mpc-insights-data-raw/
   hso-production_<tenant-id>/
-    2026061916/
-      partner-insights-reports/
-        datasets_2026-06-19T16-00-00Z.json
-        report-definitions_2026-06-19T16-00-00Z.json
-        customersandtenants-execution_2026-06-19T16-00-00Z_<execution-id>.json
-        customersandtenants_2026-06-19T16-00-00Z_<execution-id>.json
-      security-score/
-        security-score_2026-06-19T16-00-00Z.json
-  _collection-state/
-    hso-production_<tenant-id>/
-      partner-insights-reports/
+    partner-insights-reports/
+      catalog/
+        datasets.json
+        queries.json
+        _Archive/
+          datasets_2026-06-19T16-00-00Z.json
+          queries_2026-06-19T16-00-00Z.json
+      reports/
+        2026061916/
+          customersandtenants_2026-06-19T16-00-00Z_<execution-id>.json
+          customersandtenants_2026-06-19T16-00-00Z_<execution-id>_metadata.json
+      _collection-state/
+        report-definitions.json
         scheduled-reports.json
-        scheduled-reports_metadata.json
+        customersandtenants-execution.json
+        businessapplicationsrevenue-created-query.json
+        _Archive/
+          report-definitions_2026-06-19T16-00-00Z.json
+          businessapplicationsrevenue-created-query_2026-06-19T16-00-00Z.json
+      _orchestration-summaries/
+        orchestration-summary_2026-06-19T16-00-00Z.json
+    partner-security-score/
+      reports/
+        2026061916/
+          security-score_2026-06-19T16-00-00Z.json
+          security-score_2026-06-19T16-00-00Z_metadata.json
 ```
 
-Each data file has a matching `*_metadata.json` sidecar in the same folder. The date-hour folder uses UTC `yyyyMMddHH`, matching the 4-hour collection interval.
-Singleton control-plane state, such as the scheduled-report inventory, is stored under `_collection-state` and overwritten on each run so there is one source of truth.
+    Each downloaded report file has a matching `*_metadata.json` sidecar in the same dated `reports/{yyyyMMddHH}` folder. Catalog and control-state JSON files are not mixed into `reports/`; they keep one current source-of-truth file plus older versions in their `_Archive` subfolders.
 
 ## Repository structure
 
@@ -74,7 +94,7 @@ Singleton control-plane state, such as the scheduled-report inventory, is stored
 │   │   ├── TokenService.psm1        Certificate JWT client assertion + token acquisition
 │   │   ├── ApiClient.psm1           Retry/throttle core + Graph pagination
 │   │   ├── InsightsClient.psm1      Insights async flow + CSV/TSV → JSON
-│   │   ├── BlobStorageService.psm1  JSON blob writes (MI auth) + metadata sidecars
+│   │   ├── BlobStorageService.psm1  JSON blob paths/writes (MI auth), report metadata sidecars, state archives
 │   │   └── OrchestrationStarter.psm1 Shared Durable orchestration starter
 │   ├── TimerStart/                  Timer trigger (fixed every 2h)
 │   ├── ManualStart/                 HTTP trigger for operator-started collection cycles
@@ -85,7 +105,7 @@ Singleton control-plane state, such as the scheduled-report inventory, is stored
 │   ├── CollectInsights/             Activity: full Insights flow → JSON
 │   ├── LoadTenantConfig/            Loads tenants-config from Key Vault
 │   ├── LoadEndpointRegistry/        Loads the collection registry
-│   └── StoreSummaryBlob/            Writes the run summary
+│   └── StoreSummaryBlob/            Writes timestamped per-data-source orchestration summaries
 └── tests/                     Pester 5 suites (registry, IntegrationConfig, InsightsClient, TokenService)
 ```
 
@@ -100,8 +120,8 @@ Singleton control-plane state, such as the scheduled-report inventory, is stored
 ## Deployment
 
 ```powershell
-$env:APP_CLIENT_ID = '<multi-tenant-app-client-id>'
-$env:ALERT_EMAIL_ADDRESS = 'integration-alerts@hso.com'
+$env:APP_CLIENT_ID = '05573d61-6ddf-403b-90c6-d8572e6c867f'
+$env:ALERT_EMAIL_ADDRESS = 'lfrijters@hso.com'
 .\scripts\Deploy.ps1 -Environment prod -AppClientId $env:APP_CLIENT_ID -AlertEmailAddress $env:ALERT_EMAIL_ADDRESS
 ```
 

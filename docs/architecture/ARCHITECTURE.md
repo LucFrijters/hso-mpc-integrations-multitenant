@@ -6,7 +6,7 @@
 |-----------------|-------------------------------------------------|
 | Author          | Luc Frijters                                    |
 | Status          | Draft                                           |
-| Version         | 2.5                                             |
+| Version         | 2.6                                             |
 | Last Updated    | 2026-06-19                                      |
 | Classification  | Internal — Confidential                         |
 
@@ -29,6 +29,8 @@
 > **Revision 2.4 — production readiness hardening (2026-06-19).** CI/CD packaging now stages the Function App and excludes `local.settings.json` and editor-only folders before producing `function-app.zip`; resource-group naming is consistent across scripts and workflows; alert notification email is a Bicep parameter (`alertEmailAddress` / `ALERT_EMAIL_ADDRESS`); Application Insights local auth remains disabled and the Function App sets `APPLICATIONINSIGHTS_AUTHENTICATION_STRING=Authorization=AAD`; `.gitattributes` pins source/config files to LF line endings.
 
 > **Revision 2.5 — Partner Insights conformance hardening (2026-06-19).** The Insights flow now enforces dataset-driven scheduled-report recurrence, generates only explicit-column custom queries, skips registry system-query entries absent from the partner's dataset catalog, falls back to generated queries when a documented system query no longer matches live `selectableColumns`, reuses only `Active` scheduled reports, treats in-body `statusCode >= 400` envelopes as failures, records redaction/expiry/minimum-recurrence metadata, and skips re-downloading unchanged `executionId` payloads. Polling remains intentional instead of `CallbackUrl` because it avoids a public inbound surface and keeps Durable replay deterministic; execution batching remains an optional future optimization.
+
+> **Revision 2.6 — storage layout contract (2026-06-19).** Blob layout now follows the Partner Insights programmatic access flow explicitly. Catalog files live under `partner-insights-reports/catalog`, report-control state lives under `partner-insights-reports/_collection-state`, completed report payloads live only under `partner-insights-reports/reports/{yyyyMMddHH}`, and orchestration summaries live under each data-source folder's `_orchestration-summaries`. Catalog/control files keep one current JSON plus `_Archive` history; report payloads keep a metadata sidecar beside the downloaded JSON.
 
 ---
 
@@ -417,7 +419,7 @@ https://api.partnercenter.microsoft.com/insights/v1/mpn/
 
 This is the **partner-global** Insights analytics surface (`/mpn/`), distinct from the commerce REST API (`/v1/`). It is asynchronous: data is delivered as scheduled report executions, not as a direct GET response.
 
-The Microsoft Learn [Partner insights reports and data definitions](https://learn.microsoft.com/en-us/partner-center/insights/insights-data-definitions) page is the human-readable schema dictionary for interpreting exported columns. Runtime query generation deliberately uses `/ScheduledDataset.selectableColumns` instead of hard-coded documentation columns, because the docs can change independently from a partner tenant's current entitlement/schema. Each Insights metadata sidecar carries both this data-definitions URL and the system-query reference URL for lineage.
+The Microsoft Learn [Partner insights reports and data definitions](https://learn.microsoft.com/en-us/partner-center/insights/insights-data-definitions) page is the human-readable schema dictionary for interpreting exported columns. Runtime query generation deliberately uses `/ScheduledDataset.selectableColumns` instead of hard-coded documentation columns, because the docs can change independently from a partner tenant's current entitlement/schema. Downloaded report metadata sidecars carry both this data-definitions URL and the system-query reference URL for lineage.
 
 ### 7.2 Collection Pattern (per the Microsoft "programmatic access paradigm")
 
@@ -431,12 +433,17 @@ The Microsoft Learn [Partner insights reports and data definitions](https://lear
 | 6 | `GET /ScheduledReport/execution/{reportId}?executionStatus=Completed&getLatestExecution=true` | Poll for the latest completed execution → returns `reportAccessSecureLink` (SAS) once ready. Requested reports can take hours; 404/no execution before first completion is treated as "pending", not an error. |
 | 7 | Download `reportAccessSecureLink` | Fetch the report file (**CSV/TSV**) and **convert to JSON** before storing, unless the same `executionId` was already stored by a prior run. |
 
+This maps to the Microsoft programmatic access diagram: create report query, create scheduled
+report, optionally receive a notification, get report executions, then download the report link.
+This implementation deliberately uses polling instead of `CallbackUri`, so no public inbound
+notification endpoint is required.
+
 ### 7.3 Idempotency & efficiency
 
 - Reports are matched by a deterministic base name (`<prefix><DatasetName>`) and reused only while `reportStatus = Active`; non-active reports are recreated with a timestamped suffix so collection does not stall after recurrence exhaustion or a pause.
 - The latest completed execution metadata for each report is stored on every collection cycle. The report payload itself is downloaded only once per `executionId`, using a small blob marker to avoid repeated SAS egress for unchanged daily datasets.
 - The Create Report API is asynchronous: a successful `reportId` means the report was requested, not that data is available. Later cycles continue polling until a completed execution returns a secure download link, then the CSV/TSV payload is saved as JSON.
-- The scheduled-report inventory is a singleton current-state artifact at `_collection-state/<tenant>/partner-insights-reports/scheduled-reports.json`, overwritten on every run. It is deliberately not written as timestamped run output.
+- The scheduled-report inventory is a singleton current-state artifact at `<tenant>/partner-insights-reports/_collection-state/scheduled-reports.json`, overwritten on every run. Older versions are kept in `<tenant>/partner-insights-reports/_collection-state/_Archive/`.
 - Registry system-query entries are used only when the corresponding dataset appears in `/ScheduledDataset` and their projected columns are present in live `selectableColumns`; otherwise the collector falls back to a generated explicit-column query for that dataset.
 - Every dataset returned by step 1 that is not explicitly registered gets a generated explicit-column report when it publishes `selectableColumns`; column-less datasets are skipped because Partner Center's query grammar has no wildcard projection.
 
@@ -495,41 +502,88 @@ Since these are **beta** endpoints:
 
 ### 9.1 Naming Convention
 
-```
+Folder entries end with `/`. Every file entry is JSON and must end in `.json`; downloaded report metadata files use `_metadata.json`.
+
+```text
 {container}/
   {tenant-display-name}_{tenant-id}/
-    {yyyyMMddHH}/
-      {data-type}/
-        {endpoint-or-dataset-name}_{timestamp-utc}[_{execution-id}].json
-        {endpoint-or-dataset-name}_{timestamp-utc}[_{execution-id}]_metadata.json
+    partner-insights-reports/
+      catalog/
+        {partner-insight-catalog}.json
+        _Archive/
+          {partner-insight-catalog}_{timestamp-utc}.json
+      reports/
+        {yyyyMMddHH}/
+          {endpoint-or-dataset-name}_{timestamp-utc}[_{execution-id}].json
+          {endpoint-or-dataset-name}_{timestamp-utc}[_{execution-id}]_metadata.json
+      _collection-state/
+        {current-control-artifact}.json
+        _Archive/
+          {current-control-artifact}_{timestamp-utc}.json
+      _orchestration-summaries/
+        {orchestration-summary}_{timestamp-utc}.json
+    partner-security-score/
+      reports/
+        {yyyyMMddHH}/
+          {endpoint-or-dataset-name}_{timestamp-utc}[_{execution-id}].json
+          {endpoint-or-dataset-name}_{timestamp-utc}[_{execution-id}]_metadata.json
 ```
 
-`{data-type}` is one of:
+Top-level data-source folders are:
 
 | Data type | Contents |
 |-----------|----------|
-| `security-score` | Microsoft Graph Partner Security Score endpoints |
-| `partner-insights-reports` | Partner Insights catalogs and report execution JSON |
+| `partner-security-score` | Microsoft Graph Partner Security Score endpoints |
+| `partner-insights-reports` | Partner Insights downloaded report payloads |
+
+Partner Insights catalogs (`datasets.json`, `queries.json`) are current files under `catalog/`,
+with each run also archived under `catalog/_Archive/`. Resolved definitions, scheduled reports,
+created query/report responses, execution polling metadata, and execution markers are current
+files under `_collection-state/`, with older versions under `_collection-state/_Archive/`.
+Dated `reports/` folders contain only completed downloaded report payloads and their metadata
+sidecars.
 
 **Concrete example:**
 
 ```
 mpc-insights-data-raw/
   hso-production_a1b2c3d4-e5f6-7890-abcd-ef1234567890/
-    2026042014/
-      partner-insights-reports/
-        datasets_2026-04-20T14-00-00Z.json
-        datasets_2026-04-20T14-00-00Z_metadata.json
-        customersandtenants_2026-04-20T14-00-00Z_exec-123.json
-        customersandtenants_2026-04-20T14-00-00Z_exec-123_metadata.json
-      security-score/
-        security-score_2026-04-20T14-00-00Z.json
-        security-score_2026-04-20T14-00-00Z_metadata.json
+    partner-insights-reports/
+      catalog/
+        datasets.json
+        queries.json
+        _Archive/
+          datasets_2026-04-20T14-00-00Z.json
+          queries_2026-04-20T14-00-00Z.json
+      reports/
+        2026042014/
+          customersandtenants_2026-04-20T14-00-00Z_exec-123.json
+          customersandtenants_2026-04-20T14-00-00Z_exec-123_metadata.json
+      _collection-state/
+        report-definitions.json
+        scheduled-reports.json
+        customersandtenants-execution.json
+        _Archive/
+          report-definitions_2026-04-20T14-00-00Z.json
+      _orchestration-summaries/
+        orchestration-summary_2026-04-20T14-00-00Z.json
+    partner-security-score/
+      reports/
+        2026042014/
+          security-score_2026-04-20T14-00-00Z.json
+          security-score_2026-04-20T14-00-00Z_metadata.json
 ```
 
-### 9.2 Metadata Sidecar File
+The dated `partner-insights-reports/reports/{yyyyMMddHH}` folder is data-only: it receives
+converted CSV/TSV report payloads after Partner Center exposes a completed execution download
+link. Catalogs, created query/report responses, report definitions, scheduled reports, and
+execution polling metadata are kept out of dated report folders.
 
-Each data file is accompanied by a `_metadata.json`:
+### 9.2 Report Metadata Sidecar File
+
+Each downloaded report payload is accompanied by a `_metadata.json` sidecar in the same
+`reports/{yyyyMMddHH}` folder. Catalog and current-state/control JSON files do not get metadata
+sidecars; they use `_Archive` history instead.
 
 ```json
 {
@@ -537,10 +591,10 @@ Each data file is accompanied by a `_metadata.json`:
   "tenantId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "tenantDisplayName": "HSO Production",
   "apiSurface": "partner-insights",
-  "endpointCategory": "insights-catalog",
-  "endpointName": "datasets",
-  "httpMethod": "GET",
-  "requestUrl": "https://api.partnercenter.microsoft.com/insights/v1/mpn/ScheduledDataset",
+  "endpointCategory": "insights-reports",
+  "endpointName": "customersandtenants",
+  "httpMethod": "DOWNLOAD",
+  "requestUrl": "https://...reportAccessSecureLink...",
   "httpStatusCode": 200,
   "responseContentLength": 45230,
   "recordCount": 142,
@@ -716,8 +770,8 @@ All log entries must include these custom dimensions:
 | `TenantId`             | `a1b2c3d4-...`                       | Filter by partner account        |
 | `TenantDisplayName`    | `HSO Production`                     | Human-readable partner account   |
 | `ApiSurface`           | `partner-insights` / `graph-beta`    | Filter by API                    |
-| `EndpointCategory`     | `insights-catalog` / `security-score` | Filter by data domain           |
-| `EndpointName`         | `datasets` / `security-score`        | Specific endpoint                |
+| `EndpointCategory`     | `insights-catalog` / `insights-reports` / `partner-security-score` | Filter by data domain           |
+| `EndpointName`         | `datasets` / `customersandtenants` / `security-score`              | Specific endpoint                |
 | `CorrelationId`        | `f47ac10b-...`                       | Trace through entire collection  |
 | `OrchestrationId`      | `def456`                             | Durable Functions instance ID    |
 | `HttpStatusCode`       | `200` / `429`                        | Response status                  |
@@ -849,7 +903,7 @@ Because collection is **partner-global**, volume is driven by *datasets + score 
 | Every 6h  | Partner Security Score, requirements, customerInsights                                  |
 | Every 4h UTC | Security score history; Insights datasets/queries catalog; latest completed Insights report downloads |
 
-Insights scheduled-report freshness is dataset-driven. The collector reads `minimumRecurrenceInterval` from `/ScheduledDataset` and uses `clamp(max(4, datasetMin), 4, 2160)` for `POST /ScheduledReport`; for example, daily datasets such as `OfficeUsage` are scheduled at 24h rather than forced to 4h. With ~20 datasets + 4 score endpoints collected once at the partner level, a cycle issues on the order of **tens** of API calls — versus the thousands/day implied by the previous per-customer commerce-API fan-out. Each eligible cycle writes catalogs and latest execution metadata; unchanged report payloads are skipped by `executionId` marker to avoid repeated downloads. Operator-triggered `ManualStart` runs set `ForceCollection=true`, bypassing only the scheduled cadence gates; per-partner `CollectPartnerInsights` and `CollectPartnerSecurityScore` flags are still enforced by both the orchestrator and collector activities.
+Insights scheduled-report freshness is dataset-driven. The collector reads `minimumRecurrenceInterval` from `/ScheduledDataset` and uses `clamp(max(4, datasetMin), 4, 2160)` for `POST /ScheduledReport`; for example, daily datasets such as `OfficeUsage` are scheduled at 24h rather than forced to 4h. With ~20 datasets + 4 score endpoints collected once at the partner level, a cycle issues on the order of **tens** of API calls — versus the thousands/day implied by the previous per-customer commerce-API fan-out. Each eligible cycle writes current catalog snapshots, current control-state evidence, and `_Archive` history; unchanged report payloads are skipped by `executionId` marker to avoid repeated downloads. Operator-triggered `ManualStart` runs set `ForceCollection=true`, bypassing only the scheduled cadence gates; per-partner `CollectPartnerInsights` and `CollectPartnerSecurityScore` flags are still enforced by both the orchestrator and collector activities.
 
 ---
 
@@ -907,7 +961,7 @@ hso-mpc-integrations-multitenant/
 │       ├── LoadEndpointRegistry/             # Activity: import registry
 │       │   ├── function.json
 │       │   └── run.ps1
-│       ├── StoreSummaryBlob/                 # Activity: write summary
+│       ├── StoreSummaryBlob/                 # Activity: write per-data-source orchestration summary
 │       │   ├── function.json
 │       │   └── run.ps1
 │       └── modules/                          # Shared PowerShell modules
@@ -915,7 +969,7 @@ hso-mpc-integrations-multitenant/
 │           ├── TokenService.psm1             # JWT assertion + token acquisition
 │           ├── ApiClient.psm1                # Retry/throttle core + Graph pagination
 │           ├── InsightsClient.psm1           # Insights async flow + CSV/TSV -> JSON
-│           ├── BlobStorageService.psm1       # JSON blob writes (data + metadata sidecars)
+│           ├── BlobStorageService.psm1       # JSON blob paths/writes, report metadata sidecars, state archives
 │           └── EndpointRegistry.psd1         # Security-score + Insights collection registry
 ├── tests/                                    # Pester 5 test suites
 ├── scripts/

@@ -7,12 +7,12 @@ param($InputData)
     Insights is PARTNER-GLOBAL and asynchronous, so the whole stateful flow runs inside this single
     activity (keeping the Durable orchestration history small and replay-safe):
 
-      1. Enumerate datasets (/ScheduledDataset) and queries (/ScheduledQueries) -> store as JSON.
-      2. Resolve the set of reports to collect (registry + every other dataset when EnsureAllDatasets).
-        3. Idempotently ensure a scheduled report exists per dataset (create query + report if missing).
-        4. Poll the latest COMPLETED execution per report. Newly requested reports can take hours;
-            until then they are tracked as pending. Once a completed execution appears, convert the
-            CSV/TSV payload to JSON before storing it.
+        1. Enumerate datasets (/ScheduledDataset) and queries (/ScheduledQueries) -> store under catalog/.
+            2. Resolve the set of reports to collect (registry + every other dataset when EnsureAllDatasets).
+                3. Follow the Partner Center async report flow: create/reuse a report query, create/reuse an
+                     Active scheduled report, poll report executions, then download the completed report link.
+                4. Keep control evidence under _collection-state. Only converted CSV/TSV report payloads are
+                     written to reports/{yyyyMMddHH}/.
 
     Input:
         CorrelationId   : string
@@ -109,8 +109,8 @@ foreach ($cat in @($insightsCatalog)) {
             collectionCompletedUtc = [DateTimeOffset]::UtcNow.ToString('o')
         }
 
-        Write-CollectionToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $cat `
-            -JsonPayload $res.RawJson -Metadata $metadata -TimestampUtc $timestamp | Out-Null
+        Write-CollectionStateToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $cat `
+            -JsonPayload $res.RawJson -Metadata $metadata | Out-Null
 
         if ($cat.Name -eq 'datasets') { $datasetsRecords = $res.Records; $summary.DatasetsStored = $true; $summary.DatasetCount = $res.Records.Count }
         if ($cat.Name -eq 'queries') { $queriesRecords = $res.Records; $summary.QueriesStored = $true; $summary.QueryCount = $res.Records.Count }
@@ -145,9 +145,9 @@ try {
         collectionCompletedUtc = [DateTimeOffset]::UtcNow.ToString('o')
     }
 
-    Write-CollectionToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $definitionsEndpoint `
+    Write-CollectionStateToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $definitionsEndpoint `
         -JsonPayload (@($reportDefs) | ConvertTo-Json -Depth 20 -AsArray) `
-        -Metadata $definitionsMetadata -TimestampUtc $timestamp | Out-Null
+        -Metadata $definitionsMetadata | Out-Null
     $summary.ReportDefinitionsStored = $true
 }
 catch {
@@ -204,9 +204,8 @@ foreach ($def in @($reportDefs)) {
                     systemQueriesUrl                 = $systemQueriesUrl
                     collectionCompletedUtc           = [DateTimeOffset]::UtcNow.ToString('o')
                 }
-                Write-CollectionToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $queryEndpoint `
-                    -JsonPayload ($reg.QueryResponse | ConvertTo-Json -Depth 50) -Metadata $queryMetadata `
-                    -TimestampUtc $timestamp -FileNameSuffix $reg.QueryId | Out-Null
+                Write-CollectionStateToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $queryEndpoint `
+                    -JsonPayload ($reg.QueryResponse | ConvertTo-Json -Depth 50) -Metadata $queryMetadata | Out-Null
             }
 
             if ($reg.ReportResponse) {
@@ -235,9 +234,8 @@ foreach ($def in @($reportDefs)) {
                     systemQueriesUrl                 = $systemQueriesUrl
                     collectionCompletedUtc           = [DateTimeOffset]::UtcNow.ToString('o')
                 }
-                Write-CollectionToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $createdReportEndpoint `
-                    -JsonPayload ($reg.ReportResponse | ConvertTo-Json -Depth 50) -Metadata $createdReportMetadata `
-                    -TimestampUtc $timestamp -FileNameSuffix $reg.ReportId | Out-Null
+                Write-CollectionStateToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $createdReportEndpoint `
+                    -JsonPayload ($reg.ReportResponse | ConvertTo-Json -Depth 50) -Metadata $createdReportMetadata | Out-Null
             }
         }
 
@@ -276,9 +274,8 @@ foreach ($def in @($reportDefs)) {
             systemQueriesUrl                 = $systemQueriesUrl
             collectionCompletedUtc           = [DateTimeOffset]::UtcNow.ToString('o')
         }
-        Write-CollectionToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $executionEndpoint `
-            -JsonPayload ($exec | ConvertTo-Json -Depth 50) -Metadata $executionMetadata `
-            -TimestampUtc $timestamp -FileNameSuffix $exec.executionId | Out-Null
+        Write-CollectionStateToBlob -TenantId $tenantId -TenantName $tenantName -Endpoint $executionEndpoint `
+            -JsonPayload ($exec | ConvertTo-Json -Depth 50) -Metadata $executionMetadata | Out-Null
         $summary.ExecutionMetadataStored++
 
         $reportEndpoint = @{ Name = $dataset; Category = 'insights-reports'; ApiSurface = 'partner-insights' }
