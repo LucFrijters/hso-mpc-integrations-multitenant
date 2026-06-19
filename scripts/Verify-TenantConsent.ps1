@@ -20,25 +20,25 @@
     The Application (client) ID of the multi-tenant app registration.
 
 .PARAMETER CertificateName
-    Name of the certificate in Key Vault. Default: app-certificate
+    Name of the certificate in Key Vault. Default: regapp-certificate-hso-mpc-integration
 
 .PARAMETER PartnerConfigSecretName
     Name of the Key Vault secret holding partner-account JSON. Default: partner-config
 
 .EXAMPLE
-    .\Verify-TenantConsent.ps1 -KeyVaultName "kv-hso-mpc-prod" -ClientId "11111111-1111-1111-1111-111111111111"
+    .\Verify-TenantConsent.ps1 -KeyVaultName "kv-hso-mpc-integration" -ClientId "11111111-1111-1111-1111-111111111111"
 #>
 
 [CmdletBinding()]
 param (
-    [Parameter(Mandatory)]
-    [string]$KeyVaultName,
+    [Parameter()]
+    [string]$KeyVaultName = 'kv-hso-mpc-integration',
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
-    [string]$ClientId,
+    [string]$ClientId = '05573d61-6ddf-403b-90c6-d8572e6c867f',
 
-    [string]$CertificateName = 'app-certificate',
+    [string]$CertificateName = 'regapp-certificate-hso-mpc-integration',
 
     [string]$PartnerConfigSecretName = 'partner-config'
 )

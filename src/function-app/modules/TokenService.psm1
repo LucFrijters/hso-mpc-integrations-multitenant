@@ -93,8 +93,8 @@ function Get-CertificateFromKeyVault {
         [string]$CertificateName
     )
 
-    # Get the certificate secret (contains PFX data)
-    $secretValue = Get-AzKeyVaultSecret -VaultName $VaultName -Name $CertificateName -AsPlainText
+    # Get the named certificate backing secret because the PFX private key is stored there.
+    $secretValue = Get-AzKeyVaultSecret -VaultName $VaultName -Name $CertificateName -AsPlainText -WarningAction SilentlyContinue
     $certBytes = [Convert]::FromBase64String($secretValue)
 
     $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(

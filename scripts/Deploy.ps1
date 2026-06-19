@@ -75,19 +75,19 @@
 [CmdletBinding()]
 param (
     [ValidateSet('dev', 'prod')]
-    [string]$Environment = 'dev',
+    [string]$Environment = 'prod',
 
-    [string]$ResourceGroupName,
+    [string]$ResourceGroupName = "hso-mpc-multitenant-integration-prd-westeu",
 
     [string]$Location = 'westeurope',
 
-    [string]$AppClientId = $env:APP_CLIENT_ID,
+    [string]$AppClientId = '05573d61-6ddf-403b-90c6-d8572e6c867f',
 
-    [string]$AlertEmailAddress = ($env:ALERT_EMAIL_ADDRESS ?? 'integration-alerts@hso.com'),
+    [string]$AlertEmailAddress = 'lfrijters@hso.com',
 
-    [string]$SubscriptionId,
+    [string]$SubscriptionId = "12fe5cbf-2fab-4937-9368-655f987fecab", # HSO Group (DevTest)
 
-    [switch]$SkipInfra,
+    [switch]$SkipInfra = $true,
 
     [switch]$SkipCode,
 
@@ -519,7 +519,7 @@ Write-Step 10 "Post-deployment checklist (manual steps)"
 Write-Host ""
 Write-Host "  Complete these steps before the first data collection cycle:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  [ ] 1. Upload the certificate to Key Vault (creates the 'app-certificate' secret):"
+Write-Host "  [ ] 1. Upload the certificate to Key Vault (creates the 'regapp-certificate-hso-mpc-integration' secret):"
 Write-Host "         .\scripts\Rotate-Certificate.ps1 -KeyVaultName <kv-name> -ClientId $AppClientId" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  [ ] 2. Store partner-account configuration in Key Vault (secret name: 'partner-config'):"

@@ -3,69 +3,74 @@
 // Deploys all infrastructure for the multi-tenant Partner Center integration.
 // ============================================================================
 
-targetScope = 'resourceGroup'
+targetScope = 'subscription'
+param rgName string = 'hso-mpc-multitenant-integration-prd-westeu'
+param rgLocation string = 'westeurope'
 
 // --- Parameters ---
-@description('Environment name (dev, staging, prod)')
-@allowed(['dev', 'staging', 'prod'])
-param environment string = 'prod'
+@description('Environment name (dev, prd)')
+@allowed(['dev', 'prd'])
+param environment string = 'prd'
 
 @description('Azure region for all resources')
-param location string = resourceGroup().location
+param location string = rgLocation
 
 @description('Base name for resources')
-param baseName string = 'hso-mpc-multitenant-integration'
+param baseName string = 'hso-mpc-integration'
+
+@description('Name of the pre-created data storage account in this resource group')
+param storageAccountName string = 'sthsompcintegrationprd'
+
+@description('Name of the pre-created Key Vault in this resource group')
+param keyVaultName string = 'kv-hso-mpc-integration'
 
 @description('The multi-tenant app registration client ID')
-@secure()
-param appClientId string
+param appClientId string = '05573d61-6ddf-403b-90c6-d8572e6c867f' // HSO MPC Multi-Tenant Integration
 
 @description('PowerShell worker version (7.6 = preview/Windows-only/.NET 10; 7.4 = GA until 2026-11-10). Pin per environment via the .bicepparam files.')
 @allowed(['7.6', '7.4'])
 param powerShellVersion string = '7.6'
 
 @description('Email address used by Azure Monitor action group notifications.')
-param alertEmailAddress string = 'integration-alerts@hso.com'
+param alertEmailAddress string = 'lfrijters@hso.com'
 
 @description('Tags applied to all resources')
 param tags object = {
-  project: 'hso-mpc-multitenant-integration'
+  project: 'hso-mpc-integration'
   environment: environment
-  managedBy: 'bicep'
 }
 
 // --- Variables ---
-var suffix = '${baseName}-${environment}'
-var uniqueSuffix = uniqueString(resourceGroup().id, baseName, environment)
+var suffix = '${baseName}-${environment}-westeu'
+var uniqueSuffix = uniqueString(rgName, baseName, environment)
 
-// Resource names (computed once so they are compile-time constants and can be
-// used for RBAC scoping via 'existing' references).
-var storageAccountName = take('hsomnpc${uniqueSuffix}', 24)
-var keyVaultName = take('kv-${replace(suffix, '-', '')}${uniqueSuffix}', 24)
+// Existing deployment resource group.
+resource targetResourceGroup 'Microsoft.Resources/resourceGroups@2024-03-01' existing = {
+  name: rgName
+}
 
 // --- Modules ---
 
 module storage 'modules/storage.bicep' = {
   name: 'storage-${uniqueSuffix}'
+  scope: targetResourceGroup
   params: {
-    location: location
     storageAccountName: storageAccountName
-    tags: tags
   }
 }
 
 module keyVault 'modules/keyvault.bicep' = {
   name: 'keyvault-${uniqueSuffix}'
+  scope: targetResourceGroup
   params: {
-    location: location
     keyVaultName: keyVaultName
-    tags: tags
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
   }
 }
 
 module monitoring 'modules/monitoring.bicep' = {
   name: 'monitoring-${uniqueSuffix}'
+  scope: targetResourceGroup
   params: {
     location: location
     suffix: suffix
@@ -76,6 +81,7 @@ module monitoring 'modules/monitoring.bicep' = {
 
 module functionApp 'modules/function-app.bicep' = {
   name: 'function-app-${uniqueSuffix}'
+  scope: targetResourceGroup
   params: {
     location: location
     suffix: suffix
@@ -89,77 +95,18 @@ module functionApp 'modules/function-app.bicep' = {
   }
 }
 
-// --- RBAC Assignments ---
-// Reference deployed resources via 'existing' so role assignments can be
-// scoped correctly and use compile-time deterministic GUIDs.
-
-resource kvExisting 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-  dependsOn: [keyVault]
-}
-
-resource storageExisting 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
-  name: storageAccountName
-  dependsOn: [storage]
-}
-
-// Function App MI → Key Vault Secrets User
-resource kvSecretsRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: kvExisting
-  name: guid(kvExisting.id, 'kv-secrets-user', 'function-app-mi')
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      '4633458b-17de-408a-b874-0445c86b69e6'
-    ) // Key Vault Secrets User
+module rbac 'modules/rbac.bicep' = {
+  name: 'rbac-${uniqueSuffix}'
+  scope: targetResourceGroup
+  params: {
+    keyVaultName: keyVault.outputs.keyVaultName
+    storageAccountName: storage.outputs.storageAccountName
     principalId: functionApp.outputs.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Function App MI → Key Vault Certificate User
-resource kvCertRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: kvExisting
-  name: guid(kvExisting.id, 'kv-certificate-user', 'function-app-mi')
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      'db79e9a7-68ee-4b58-9aeb-b90e7c24fcba'
-    ) // Key Vault Certificate User
-    principalId: functionApp.outputs.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Function App MI → Storage Blob Data Contributor (on data storage)
-resource blobContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: storageExisting
-  name: guid(storageExisting.id, 'storage-blob-data-contributor', 'function-app-mi')
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
-    ) // Storage Blob Data Contributor
-    principalId: functionApp.outputs.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Function App MI → Monitoring Metrics Publisher (App Insights ingestion)
-resource metricsPublisherRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: resourceGroup()
-  name: guid(resourceGroup().id, 'monitoring-metrics-publisher', 'function-app-mi')
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      '3913510d-42f4-4e42-8a64-420c390055eb'
-    ) // Monitoring Metrics Publisher
-    principalId: functionApp.outputs.principalId
-    principalType: 'ServicePrincipal'
   }
 }
 
 // --- Outputs ---
+output resourceGroupId string = targetResourceGroup.id
 output functionAppName string = functionApp.outputs.functionAppName
 output functionAppPrincipalId string = functionApp.outputs.principalId
 output storageAccountName string = storage.outputs.storageAccountName

@@ -17,10 +17,10 @@ param appInsightsConnectionString string
 @allowed(['7.6', '7.4'])
 param powerShellVersion string = '7.6'
 
-var funcAppName = 'func-${suffix}'
-var planName = 'asp-${suffix}'
+var funcAppName = 'func-hso-mpc-integration-prd-westeu'
+var planName = 'asp-hso-mpc-integration-prd-westeu'
 // Durable Functions needs its own storage for state
-var funcStorageName = take('stfunc${uniqueSuffix}', 24)
+var funcStorageName = 'sthsompcintegrationfunc'
 
 // --- Function App Storage (for Durable Functions runtime) ---
 // Note: identity-based connection used (AzureWebJobsStorage__accountName).
@@ -117,7 +117,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         }
         {
           name: 'STORAGE_CONTAINER_NAME'
-          value: 'partner-data-raw'
+          value: 'mpc-insights-data-raw'
         }
         {
           name: 'PARTNER_CONFIG_SECRET_NAME'
@@ -125,7 +125,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         }
         {
           name: 'APP_CERTIFICATE_NAME'
-          value: 'app-certificate'
+          value: 'regapp-certificate-hso-mpc-integration'
         }
         {
           name: 'APP_CLIENT_ID'

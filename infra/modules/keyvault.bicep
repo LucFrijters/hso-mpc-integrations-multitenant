@@ -1,38 +1,15 @@
 // ============================================================================
-// Key Vault module — Key Vault Premium with RBAC and public authenticated access
+// Key Vault module — existing Key Vault diagnostic settings
 // ============================================================================
 
-param location string
 param keyVaultName string
-param tags object
 param logAnalyticsWorkspaceId string
 
 var kvName = keyVaultName
 
-// --- Key Vault ---
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+// --- Existing Key Vault ---
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: kvName
-  location: location
-  tags: tags
-  properties: {
-    sku: {
-      family: 'A'
-      name: 'premium' // HSM-backed keys
-    }
-    tenantId: subscription().tenantId
-    enableRbacAuthorization: true // Use RBAC, not access policies
-    enableSoftDelete: true
-    softDeleteRetentionInDays: 90
-    enablePurgeProtection: true
-    enabledForDeployment: false
-    enabledForDiskEncryption: false
-    enabledForTemplateDeployment: false
-    publicNetworkAccess: 'Enabled'
-    networkAcls: {
-      defaultAction: 'Allow'
-      bypass: 'AzureServices'
-    }
-  }
 }
 
 // --- Diagnostic Settings ---

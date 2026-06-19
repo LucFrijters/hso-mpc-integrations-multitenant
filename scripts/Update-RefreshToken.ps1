@@ -31,7 +31,7 @@
     'partner-config' are processed.
 
 .PARAMETER CertificateName
-    Name of the certificate secret in Key Vault. Default: app-certificate
+    Name of the certificate secret in Key Vault. Default: regapp-certificate-hso-mpc-integration
 
 .PARAMETER PartnerConfigSecretName
     Name of the Key Vault secret holding partner-account JSON. Default: partner-config
@@ -40,10 +40,10 @@
     Which API surface scope to renew against. Default: partner-insights
 
 .EXAMPLE
-    .\Update-RefreshToken.ps1 -KeyVaultName kv-hso-mpc-prod -ClientId 1111...
+    .\Update-RefreshToken.ps1 -KeyVaultName kv-hso-mpc-integration -ClientId 1111...
 
 .EXAMPLE
-    .\Update-RefreshToken.ps1 -KeyVaultName kv-hso-mpc-prod -ClientId 1111... -TenantId 2222...
+    .\Update-RefreshToken.ps1 -KeyVaultName kv-hso-mpc-integration -ClientId 1111... -TenantId 2222...
 
 .NOTES
     If renewal fails with an invalid_grant / expired token error, the 90-day window has lapsed and
@@ -64,7 +64,7 @@ param (
     [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
     [string]$TenantId,
 
-    [string]$CertificateName = 'app-certificate',
+    [string]$CertificateName = 'regapp-certificate-hso-mpc-integration',
 
     [string]$PartnerConfigSecretName = 'partner-config',
 

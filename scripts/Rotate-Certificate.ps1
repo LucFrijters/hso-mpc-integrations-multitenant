@@ -11,7 +11,7 @@
     Name of the Azure Key Vault holding the certificate.
 
 .PARAMETER CertificateName
-    Name of the certificate in Key Vault. Default: app-certificate
+    Name of the certificate in Key Vault. Default: regapp-certificate-hso-mpc-integration
 
 .PARAMETER ClientId
     The Application (client) ID of the multi-tenant app registration.
@@ -20,27 +20,27 @@
     Certificate validity period in months. Default: 12
 
 .PARAMETER SubjectName
-    Certificate subject. Default: CN=hso-mpc-integration
+    Certificate subject. Default: CN=regapp-certificate-hso-mpc-integration
 
 .EXAMPLE
-    .\Rotate-Certificate.ps1 -KeyVaultName "kv-hso-mpc-prod" -ClientId "11111111-1111-1111-1111-111111111111"
+    .\Rotate-Certificate.ps1 -KeyVaultName "kv-hso-mpc-integration" -ClientId "11111111-1111-1111-1111-111111111111"
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
 param (
-    [Parameter(Mandatory)]
-    [string]$KeyVaultName,
+    [Parameter()]
+    [string]$KeyVaultName = 'kv-hso-mpc-integration',
 
-    [string]$CertificateName = 'app-certificate',
+    [string]$CertificateName = 'regapp-certificate-hso-mpc-integration',
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
-    [string]$ClientId,
+    [string]$ClientId = '05573d61-6ddf-403b-90c6-d8572e6c867f',
 
     [ValidateRange(1, 36)]
     [int]$ValidityMonths = 12,
 
-    [string]$SubjectName = 'CN=hso-mpc-integration'
+    [string]$SubjectName = 'CN=regapp-certificate-hso-mpc-integration'
 )
 
 $ErrorActionPreference = 'Stop'

@@ -30,7 +30,7 @@
     The partner tenant ID to grant consent in (the tenant whose API access you are enabling).
 
 .PARAMETER CertificateName
-    Name of the certificate secret in Key Vault. Default: app-certificate
+    Name of the certificate secret in Key Vault. Default: regapp-certificate-hso-mpc-integration
 
 .PARAMETER Resource
     Which API surface to consent for. Default: partner-insights
@@ -40,7 +40,7 @@
     the app, e.g. http://localhost:8400/. Default: 8400
 
 .EXAMPLE
-    .\Initialize-SecureAppConsent.ps1 -KeyVaultName kv-hso-mpc-prod `
+    .\Initialize-SecureAppConsent.ps1 -KeyVaultName kv-hso-mpc-integration `
         -ClientId 1111... -TenantId 2222...
 
 .NOTES
@@ -57,18 +57,18 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '',
     Justification = 'The refresh token is received over TLS and must be converted to a SecureString to persist it via Set-AzKeyVaultSecret.')]
 param (
-    [Parameter(Mandatory)]
-    [string]$KeyVaultName,
+    [Parameter()]
+    [string]$KeyVaultName = 'kv-hso-mpc-integration',
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
-    [string]$ClientId,
+    [string]$ClientId = '05573d61-6ddf-403b-90c6-d8572e6c867f',
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
-    [string]$TenantId,
+    [string]$TenantId = '9bc096ab-f225-476e-8e92-260401469868',
 
-    [string]$CertificateName = 'app-certificate',
+    [string]$CertificateName = 'regapp-certificate-hso-mpc-integration',
 
     [ValidateSet('partner-insights', 'graph-beta')]
     [string]$Resource = 'partner-insights',

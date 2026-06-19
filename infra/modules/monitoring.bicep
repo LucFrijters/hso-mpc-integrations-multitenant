@@ -7,8 +7,8 @@ param suffix string
 param tags object
 param alertEmailAddress string
 
-var lawName = 'law-${suffix}'
-var aiName = 'ai-${suffix}'
+var lawName = 'law-hso-mpc-integration-prd-westeu'
+var aiName = 'ai-func-hso-mpc-integration-prd-westeu'
 
 // --- Log Analytics Workspace ---
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
@@ -45,7 +45,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 
 // --- Action Group ---
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
-  name: 'ag-${suffix}'
+  name: 'ag-hso-mpc-integration-prd-westeu'
   location: 'global'
   tags: tags
   properties: {

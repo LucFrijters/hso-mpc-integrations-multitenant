@@ -63,7 +63,7 @@ Each execution is de-duplicated by `executionId` (a marker blob under `_insights
 - A multi-tenant Entra app (certificate credential) consented in the HSO Production Partner Center with:
   - **Graph** `PartnerSecurity.Read.All` (application)
   - **Partner Center** `user_impersonation` (delegated) for the Secure Application Model refresh-token flow (`InsightsAuthMode: AppPlusUser`, the default)
-- A Key Vault certificate secret named `app-certificate` and a Secure Application Model refresh token stored as `refresh-token-<tenantId>` for each App+User partner account.
+- A Key Vault certificate secret named `regapp-certificate-hso-mpc-integration` and a Secure Application Model refresh token stored as `refresh-token-<tenantId>` for each App+User partner account.
 
 ## Deployment
 

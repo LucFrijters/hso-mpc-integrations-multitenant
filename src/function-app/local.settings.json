@@ -9,7 +9,7 @@
     "STORAGE_ACCOUNT_NAME": "hsompcintegrationsa",
     "STORAGE_CONTAINER_NAME": "partner-data-raw",
     "PARTNER_CONFIG_SECRET_NAME": "partner-config",
-    "APP_CERTIFICATE_NAME": "app-certificate",
+    "APP_CERTIFICATE_NAME": "regapp-certificate-hso-mpc-integration",
     "APP_CLIENT_ID": "",
     "TIMER_SCHEDULE": "0 0 */2 * * *",
     "INSIGHTS_DAILY_HOUR_UTC": "2",

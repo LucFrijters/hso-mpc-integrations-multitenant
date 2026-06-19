@@ -38,7 +38,7 @@ function Get-IntegrationConfig {
         StorageAccountName         = $env:STORAGE_ACCOUNT_NAME
         StorageContainerName       = $env:STORAGE_CONTAINER_NAME ?? 'partner-data-raw'
         AppClientId                = $env:APP_CLIENT_ID
-        AppCertificateName         = $env:APP_CERTIFICATE_NAME ?? 'app-certificate'
+        AppCertificateName         = $env:APP_CERTIFICATE_NAME ?? 'regapp-certificate-hso-mpc-integration'
 
         # Partner-account registry (replaces per-customer 'tenant-config').
         # JSON array: [{ TenantId, DisplayName, MpnId, Enabled, InsightsAuthMode }]

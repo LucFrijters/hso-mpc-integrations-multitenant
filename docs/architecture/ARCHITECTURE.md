@@ -290,7 +290,7 @@ The solution uses **PowerShell 7.6** with a custom JWT client assertion for cert
 
 ```powershell
 # Build JWT assertion from certificate loaded from Key Vault
-$cert = Get-AzKeyVaultCertificate -VaultName $kvName -Name 'app-certificate'
+$cert = Get-AzKeyVaultCertificate -VaultName $kvName -Name 'regapp-certificate-hso-mpc-integration'
 $jwt  = New-ClientAssertionJwt -Certificate $cert.Certificate `
     -ClientId $clientId -TenantId $tenantId
 
@@ -837,7 +837,7 @@ For local development, `scripts/Initialize-LocalDevelopment.ps1` can update an e
 
 | Secret / Certificate            | Purpose                                                   | Rotation                      |
 |---------------------------------|-----------------------------------------------------------|-------------------------------|
-| `app-certificate`               | X.509 cert for multi-tenant app authentication            | Auto-rotate via KV policy, 12mo |
+| `regapp-certificate-hso-mpc-integration` | X.509 cert for multi-tenant app authentication            | Auto-rotate via KV policy, 12mo |
 | `refresh-token-{tenantId}`      | Stored refresh tokens for App+User endpoints              | Monitored, re-consent if expired |
 | `partner-config`                | JSON array of enabled partner accounts and auth mode      | Manual update on partner-account changes |
 
@@ -1084,7 +1084,7 @@ scripts/Initialize-SecureAppConsent.ps1 -KeyVaultName <kv> -ClientId <client-id>
 
 | Secret Name                              | Content                                  |
 |------------------------------------------|------------------------------------------|
-| `app-certificate`                        | X.509 certificate (PFX)                 |
+| `regapp-certificate-hso-mpc-integration` | X.509 certificate (PFX)                 |
 | `partner-config`                         | JSON: `[{TenantId, DisplayName, Enabled, InsightsAuthMode, MpnId}]` |
 | `refresh-token-{tenant-id}`              | OAuth2 refresh token (Secure App Model)  |
 

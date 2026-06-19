@@ -13,7 +13,7 @@
     The Application (client) ID of the multi-tenant app registration.
 
 .PARAMETER RedirectUri
-    The redirect URI registered in the app registration. Default: http://localhost
+    The redirect URI registered in the app registration. Default: http://localhost:8400
 
 .EXAMPLE
     .\Grant-AdminConsent.ps1 -TenantId "00000000-0000-0000-0000-000000000000" -ClientId "11111111-1111-1111-1111-111111111111"
@@ -21,15 +21,15 @@
 
 [CmdletBinding()]
 param (
-    [Parameter(Mandatory)]
+    [Parameter()]
     [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
-    [string]$TenantId,
+    [string]$TenantId = '9bc096ab-f225-476e-8e92-260401469868',
 
-    [Parameter(Mandatory)]
+    [Parameter()]
     [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
-    [string]$ClientId,
+    [string]$ClientId = '05573d61-6ddf-403b-90c6-d8572e6c867f',
 
-    [string]$RedirectUri = 'http://localhost'
+    [string]$RedirectUri = 'http://localhost:8400'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,9 +42,9 @@ Write-Host ""
 
 # Build the admin consent URL
 $consentUrl = "https://login.microsoftonline.com/$TenantId/adminconsent" +
-    "?client_id=$ClientId" +
-    "&redirect_uri=$([System.Uri]::EscapeDataString($RedirectUri))" +
-    "&state=$(New-Guid)"
+"?client_id=$ClientId" +
+"&redirect_uri=$([System.Uri]::EscapeDataString($RedirectUri))" +
+"&state=$(New-Guid)"
 
 Write-Host "Opening admin consent URL in your default browser..." -ForegroundColor Yellow
 Write-Host ""
